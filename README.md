@@ -156,3 +156,4 @@ Manual workflow can process a submission file from the repository and upload:
 
 - Contribution guide: `CONTRIBUTING.md`
 - Support guide: `SUPPORT.md`
+- Codespaces guide (English): `CODESPACES_GUIDE_EN.md`
