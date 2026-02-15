@@ -1,54 +1,91 @@
 # DOAJ_Reviewer
 
-Online reviewer for DOAJ application submissions.
+[![CI](https://github.com/ikhwan-arief/DOAJ_Reviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/ikhwan-arief/DOAJ_Reviewer/actions/workflows/ci.yml)
 
-## Scope
+Automated reviewer for DOAJ application submissions.
 
-This repository is focused on automated review (not form filling):
+## About
 
-- read applicant-provided URLs,
-- extract and analyze page text,
-- compare findings against DOAJ guidance/rules,
-- return `pass`, `fail`, or `need_human_review` with evidence.
+This project validates applicant-provided journal URLs against DOAJ must-rules.
+It is designed as a reviewer assistant, not a form-filling assistant.
 
-## Current specs
+Main objective:
 
-- Endogeny rule package:
-  - `specs/reviewer/rules/endogeny.v1.yaml`
-  - `specs/reviewer/schemas/endogeny-evaluation.schema.json`
-  - `specs/reviewer/templates/endogeny-audit-report.md`
-  - `specs/reviewer/schemas/submission.schema.json`
+- crawl journal policy/content pages from submission URLs,
+- extract natural-language text and structured signals,
+- evaluate rules and provide decision outputs with evidence,
+- route uncertain cases to human review.
 
-## Current implementation
+Primary DOAJ references used by this repository:
 
-- Python evaluator skeleton for endogeny:
-  - `src/doaj_reviewer/basic_rules.py`
-  - `src/doaj_reviewer/endogeny.py`
-  - `src/doaj_reviewer/intake.py`
-  - `src/doaj_reviewer/web.py`
-  - `src/doaj_reviewer/evaluate.py`
-  - `src/doaj_reviewer/review.py`
-  - `src/doaj_reviewer/reporting.py`
-  - `src/doaj_reviewer/sim_server.py`
-- Example input:
-  - `examples/submission.raw.example.json`
-  - `examples/submission.example.json`
-  - `examples/submissions_batch.template.csv`
-- Unit tests:
-  - `tests/test_basic_rules.py`
-  - `tests/test_endogeny.py`
-  - `tests/test_intake.py`
-  - `tests/test_review.py`
-  - `tests/test_sim_server.py`
-  - `tests/test_spreadsheet_batch.py`
-  - `tests/test_web.py`
-- GitHub Actions:
-  - `.github/workflows/ci.yml`
-  - `.github/workflows/review-submission.yml`
+- https://doaj.org/apply/
+- https://doaj.org/apply/guide/
+- https://doaj.org/apply/transparency/
+- https://doaj.org/apply/copyright-and-licensing/
 
-## Run locally
+## Decision Outputs
 
-Raw submission (URL-based intake + evaluation):
+Each rule check returns one of:
+
+- `pass`
+- `fail`
+- `need_human_review`
+
+The aggregate decision in `review-summary.json` follows:
+
+- any `fail` -> overall `fail`
+- otherwise, any `need_human_review` -> overall `need_human_review`
+- otherwise -> overall `pass`
+
+## Rule Coverage
+
+Current automatic evaluators:
+
+- `doaj.open_access_statement.v1`
+- `doaj.aims_scope.v1`
+- `doaj.editorial_board.v1`
+- `doaj.instructions_for_authors.v1`
+- `doaj.peer_review_policy.v1`
+- `doaj.license_terms.v1`
+- `doaj.copyright_author_rights.v1`
+- `doaj.publication_fees_disclosure.v1`
+- `doaj.publisher_identity.v1`
+- `doaj.issn_consistency.v1`
+- `doaj.endogeny.v1`
+
+Endogeny rule follows DOAJ threshold logic:
+
+- issue-based journals: max 25% in each of the latest two issues
+- continuous model: max 25% in last calendar year, minimum 5 articles
+
+## Repository Structure
+
+- Core logic: `src/doaj_reviewer/`
+- Rule/spec docs: `specs/reviewer/`
+- Examples: `examples/`
+- Tests: `tests/`
+- CI/workflows: `.github/workflows/`
+
+## Local Usage
+
+Run all tests:
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Run structured submission review:
+
+```bash
+PYTHONPATH=src python -m doaj_reviewer.review \
+  --submission examples/submission.example.json \
+  --summary-json /tmp/review-summary.json \
+  --summary-md /tmp/review-summary.md \
+  --endogeny-json /tmp/endogeny-result.json \
+  --endogeny-md /tmp/endogeny-report.md
+```
+
+Run raw URL submission intake + review:
 
 ```bash
 PYTHONPATH=src python -m doaj_reviewer.evaluate \
@@ -60,28 +97,7 @@ PYTHONPATH=src python -m doaj_reviewer.evaluate \
   --output-md /tmp/endogeny-report.md
 ```
 
-Structured submission (direct evaluation):
-
-```bash
-PYTHONPATH=src python -m doaj_reviewer.evaluate \
-  --submission examples/submission.example.json \
-  --input-mode structured \
-  --output-json /tmp/endogeny-result.json \
-  --output-md /tmp/endogeny-report.md
-```
-
-Run aggregate reviewer (`must` ruleset summary + endogeny detail):
-
-```bash
-PYTHONPATH=src python -m doaj_reviewer.review \
-  --submission examples/submission.example.json \
-  --summary-json /tmp/review-summary.json \
-  --summary-md /tmp/review-summary.md \
-  --endogeny-json /tmp/endogeny-result.json \
-  --endogeny-md /tmp/endogeny-report.md
-```
-
-Batch from spreadsheet CSV:
+Run spreadsheet batch:
 
 ```bash
 PYTHONPATH=src python -m doaj_reviewer.spreadsheet_batch \
@@ -90,7 +106,7 @@ PYTHONPATH=src python -m doaj_reviewer.spreadsheet_batch \
   --js-mode auto
 ```
 
-Spreadsheet conversion-only (no crawling/review execution):
+Convert spreadsheet rows to raw JSON only (without crawling):
 
 ```bash
 PYTHONPATH=src python -m doaj_reviewer.spreadsheet_batch \
@@ -99,41 +115,44 @@ PYTHONPATH=src python -m doaj_reviewer.spreadsheet_batch \
   --convert-only
 ```
 
-Web simulation app (real form -> run -> artifacts):
+## Simulation Web App
+
+Start local simulation server:
 
 ```bash
 PYTHONPATH=src python -m doaj_reviewer.sim_server --host 127.0.0.1 --port 8787
 ```
 
-Open: `http://127.0.0.1:8787`
+Open:
 
-Useful simulation endpoints:
+- `http://127.0.0.1:8787`
 
-- `GET /api/runs` (default latest 20 runs, optional `?limit=all` or `?limit=<n>`)
-- `GET /api/export.csv?limit=all` (download aggregated runs overview as CSV)
-- `GET /runs/<run_id>/<artifact-file>` (read stored artifact file)
+Useful endpoints:
 
-Run tests:
+- `GET /api/runs` (default latest 20, supports `?limit=all` or `?limit=<n>`)
+- `GET /api/export.csv?limit=all` (download all runs summary as CSV)
+- `GET /runs/<run_id>/<artifact-file>` (download run artifacts)
 
-```bash
-PYTHONPATH=src python -m unittest discover -s tests -p "test_*.py" -v
-```
+## GitHub Actions
 
-## Notes
+This repository includes:
 
-- Intake crawler supports static HTML parsing and optional JS-render fallback (`--js-mode auto|on`) using Playwright when available.
-- If HTTPS certificate verification fails on local Python, fetcher retries once with insecure TLS (skip-verify) so policy pages can still be read.
-- Output decisions are `pass`, `fail`, or `need_human_review`.
-- Auto-evaluated checks currently include:
-  - `doaj.open_access_statement.v1`
-  - `doaj.aims_scope.v1`
-  - `doaj.editorial_board.v1`
-  - `doaj.instructions_for_authors.v1`
-  - `doaj.peer_review_policy.v1`
-  - `doaj.license_terms.v1`
-  - `doaj.copyright_author_rights.v1`
-  - `doaj.publication_fees_disclosure.v1`
-  - `doaj.publisher_identity.v1`
-  - `doaj.issn_consistency.v1`
-  - `doaj.endogeny.v1`
-- All current `must` checks in `ruleset.must.v1.json` are wired to automatic evaluators.
+- `CI` workflow on push/pull_request (`.github/workflows/ci.yml`)
+- manual review workflow (`.github/workflows/review-submission.yml`)
+
+Manual workflow can process a submission file from the repository and upload:
+
+- `review-summary.json` / `review-summary.md`
+- `endogeny-result.json` / `endogeny-report.md`
+- `submission.structured.json`
+
+## Notes and Limitations
+
+- JS-heavy pages are supported via Playwright (`js_mode=auto|on`) when Playwright is installed.
+- If Python TLS verification fails locally, fetcher retries once using insecure TLS (skip-verify).
+- Some journals may still require manual review due to anti-bot controls, auth walls, or ambiguous policy wording.
+
+## Repository Information
+
+- Contribution guide: `CONTRIBUTING.md`
+- Support guide: `SUPPORT.md`
