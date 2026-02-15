@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate JSON schemas parse
+        run: |
+          python - <<'PY'
+          import json
+          for path in [
+              "specs/reviewer/schemas/submission-raw.schema.json",
+              "specs/reviewer/schemas/submission.schema.json",
+              "specs/reviewer/schemas/endogeny-evaluation.schema.json",
+              "specs/reviewer/rules/ruleset.must.v1.json",
+          ]:
+              with open(path, "r", encoding="utf-8") as f:
+                  json.load(f)
+              print("ok:", path)
+          PY
+
+      - name: Smoke test evaluator CLI
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m doaj_reviewer.evaluate \
+            --submission examples/submission.example.json \
+            --input-mode structured \
+            --output-json /tmp/endogeny-result.json \
+            --output-md /tmp/endogeny-report.md
+          python -m doaj_reviewer.review \
+            --submission examples/submission.example.json \
+            --summary-json /tmp/review-summary.json \
+            --summary-md /tmp/review-summary.md \
+            --endogeny-json /tmp/endogeny-result-2.json \
+            --endogeny-md /tmp/endogeny-report-2.md
+          python -m doaj_reviewer.spreadsheet_batch \
+            --input-csv examples/submissions_batch.template.csv \
+            --output-dir /tmp/doaj-batch \
+            --convert-only
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -p "test_*.py" -v

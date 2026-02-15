@@ -1,0 +1,147 @@
+rule_id: doaj.endogeny.v1
+title: Endogeny must be minimised
+version: "1.0.0"
+status: active
+requirement_level: must
+category: editorial_practice
+summary: >
+  The proportion of published research papers with at least one author who is
+  an editor, editorial board member, or reviewer must not exceed 25%.
+sources:
+  - url: https://doaj.org/apply/guide/
+    note: DOAJ application guide (must requirements and endogeny wording).
+  - url: https://doaj.org/apply/transparency/
+    note: DOAJ transparency principles.
+inputs:
+  required:
+    - journal_homepage_url
+    - editorial_board_urls
+    - latest_content_urls
+  optional:
+    - reviewer_list_urls
+    - archives_urls
+    - sitemap_url
+normalization:
+  language:
+    detect: true
+    translate_to: en
+  names:
+    lowercase: true
+    strip_titles:
+      - dr
+      - prof
+      - professor
+      - mr
+      - ms
+      - mrs
+    remove_punctuation: true
+    collapse_whitespace: true
+    ascii_fold: true
+  person_id:
+    strategy: hybrid
+    methods:
+      - exact_normalized_name
+      - initials_plus_family_name
+      - affiliation_hint
+      - orcid_hint
+    fuzzy_threshold: 0.94
+content_scope:
+  research_article_classifier:
+    include_when_any:
+      - article_type_in:
+          - research article
+          - original article
+          - article
+      - section_in:
+          - articles
+          - research
+          - original research
+    exclude_when_any:
+      - article_type_in:
+          - editorial
+          - corrigendum
+          - erratum
+          - retraction
+          - letter
+          - news
+          - review book
+  publication_model_detection:
+    issue_based_if_any:
+      - volume_issue_detected
+      - issue_archive_present
+    continuous_if_any:
+      - continuous_publication_label
+      - no_issue_structure_detected
+collection_rules:
+  issue_based:
+    sample_window: latest_2_issues
+    min_research_articles_per_issue: 1
+    denominator: total_research_articles_in_issue
+    numerator: research_articles_with_at_least_1_author_in_role_set
+    role_set:
+      - editor
+      - editorial_board_member
+      - reviewer
+  continuous_publication:
+    sample_window: last_calendar_year
+    min_research_articles_per_year: 5
+    denominator: total_research_articles_in_year
+    numerator: research_articles_with_at_least_1_author_in_role_set
+    role_set:
+      - editor
+      - editorial_board_member
+      - reviewer
+thresholds:
+  max_ratio: 0.25
+decision_policy:
+  pass:
+    all_conditions:
+      - sufficient_evidence: true
+      - all_measured_units_ratio_lte: 0.25
+      - no_material_conflicts: true
+  fail:
+    any_conditions:
+      - any_measured_unit_ratio_gt: 0.25
+      - explicit_site_statement_conflicts_with_evidence: true
+  need_human_review:
+    any_conditions:
+      - insufficient_evidence: true
+      - ambiguous_person_matches: true
+      - unable_to_classify_research_articles: true
+      - unable_to_confirm_latest_2_issues_or_last_year: true
+      - measured_units_missing: true
+evidence_requirements:
+  must_include:
+    - crawl_timestamp_utc
+    - publication_model_detected
+    - editor_and_board_source_urls
+    - reviewer_source_urls_or_absence_note
+    - measured_units
+    - per_unit_counts
+    - matched_articles
+    - matching_method
+    - confidence
+  quote_policy:
+    per_evidence_quote_max_chars: 300
+    include_source_url: true
+    include_locator_hint: true
+output_contract:
+  result_enum:
+    - pass
+    - fail
+    - need_human_review
+  confidence_range:
+    min: 0
+    max: 1
+  required_fields:
+    - rule_id
+    - result
+    - confidence
+    - explanation_en
+    - computed_metrics
+    - evidence
+    - limitations
+timeouts:
+  max_total_seconds: 75
+  max_per_page_seconds: 12
+  max_pages_per_domain: 20

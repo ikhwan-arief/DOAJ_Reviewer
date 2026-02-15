@@ -1,0 +1,47 @@
+{
+  "submission_id": "SUB-2026-RAW-0001",
+  "journal_homepage_url": "https://example-journal.org",
+  "publication_model": "issue_based",
+  "source_urls": {
+    "editorial_board": [
+      "https://example-journal.org/editorial-board"
+    ],
+    "reviewers": [
+      "https://example-journal.org/reviewers"
+    ],
+    "latest_content": [
+      "https://example-journal.org/volume-12-issue-2",
+      "https://example-journal.org/volume-12-issue-1"
+    ],
+    "archives": [
+      "https://example-journal.org/archive"
+    ],
+    "open_access_statement": [
+      "https://example-journal.org/open-access"
+    ],
+    "peer_review_policy": [
+      "https://example-journal.org/peer-review"
+    ],
+    "license_terms": [
+      "https://example-journal.org/licensing"
+    ],
+    "copyright_author_rights": [
+      "https://example-journal.org/copyright"
+    ],
+    "publication_fees_disclosure": [
+      "https://example-journal.org/apc"
+    ],
+    "publisher_identity": [
+      "https://example-journal.org/publisher"
+    ],
+    "issn_consistency": [
+      "https://example-journal.org/about"
+    ],
+    "aims_scope": [
+      "https://example-journal.org/aims-and-scope"
+    ],
+    "instructions_for_authors": [
+      "https://example-journal.org/instructions"
+    ]
+  }
+}

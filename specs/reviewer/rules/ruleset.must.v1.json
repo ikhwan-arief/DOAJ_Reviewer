@@ -1,0 +1,78 @@
+{
+  "ruleset_id": "doaj.must.v1",
+  "version": "1.0.0",
+  "sources": [
+    "https://doaj.org/apply/",
+    "https://doaj.org/apply/guide/",
+    "https://doaj.org/apply/transparency/",
+    "https://doaj.org/apply/copyright-and-licensing/"
+  ],
+  "checks": [
+    {
+      "rule_id": "doaj.open_access_statement.v1",
+      "title": "Open access statement matches DOAJ definition",
+      "category": "open_access_compliance",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.aims_scope.v1",
+      "title": "Aims and scope available and clear",
+      "category": "editorial",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.editorial_board.v1",
+      "title": "Editorial board names and affiliations are available",
+      "category": "editorial",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.instructions_for_authors.v1",
+      "title": "Instructions for authors are available",
+      "category": "editorial",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.peer_review_policy.v1",
+      "title": "Peer review policy is clearly stated",
+      "category": "editorial",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.license_terms.v1",
+      "title": "License terms are clearly stated",
+      "category": "copyright_licensing",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.copyright_author_rights.v1",
+      "title": "Copyright and author rights policy is clearly stated",
+      "category": "copyright_licensing",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.publication_fees_disclosure.v1",
+      "title": "Publication fee policy is clearly stated",
+      "category": "business_model",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.publisher_identity.v1",
+      "title": "Publisher identity and contact details are available",
+      "category": "about_journal",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.issn_consistency.v1",
+      "title": "ISSN on website is valid and consistent",
+      "category": "about_journal",
+      "implemented": true
+    },
+    {
+      "rule_id": "doaj.endogeny.v1",
+      "title": "Endogeny is minimised (<=25%)",
+      "category": "editorial_practice",
+      "implemented": true
+    }
+  ]
+}

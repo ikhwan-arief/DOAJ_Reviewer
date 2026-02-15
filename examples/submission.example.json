@@ -1,0 +1,287 @@
+{
+  "submission_id": "SUB-2026-0001",
+  "journal_homepage_url": "https://example-journal.org",
+  "publication_model": "issue_based",
+  "crawl_timestamp_utc": "2026-02-12T10:00:00Z",
+  "source_urls": {
+    "editorial_board": [
+      "https://example-journal.org/editorial-board"
+    ],
+    "reviewers": [
+      "https://example-journal.org/reviewers"
+    ],
+    "latest_content": [
+      "https://example-journal.org/volume-12-issue-2",
+      "https://example-journal.org/volume-12-issue-1"
+    ],
+    "archives": [
+      "https://example-journal.org/archive"
+    ],
+    "open_access_statement": [
+      "https://example-journal.org/open-access"
+    ],
+    "peer_review_policy": [
+      "https://example-journal.org/peer-review"
+    ],
+    "license_terms": [
+      "https://example-journal.org/licensing"
+    ],
+    "copyright_author_rights": [
+      "https://example-journal.org/copyright"
+    ],
+    "publication_fees_disclosure": [
+      "https://example-journal.org/apc"
+    ],
+    "publisher_identity": [
+      "https://example-journal.org/publisher"
+    ],
+    "issn_consistency": [
+      "https://example-journal.org/about"
+    ],
+    "aims_scope": [
+      "https://example-journal.org/aims-and-scope"
+    ],
+    "instructions_for_authors": [
+      "https://example-journal.org/instructions"
+    ]
+  },
+  "role_people": [
+    {
+      "name": "Dr. Jane Smith",
+      "role": "editor",
+      "source_url": "https://example-journal.org/editorial-board"
+    },
+    {
+      "name": "Asep Rahman",
+      "role": "editorial_board_member",
+      "source_url": "https://example-journal.org/editorial-board"
+    },
+    {
+      "name": "Dwi Prasetyo",
+      "role": "editorial_board_member",
+      "source_url": "https://example-journal.org/editorial-board"
+    },
+    {
+      "name": "Lina Putri",
+      "role": "reviewer",
+      "source_url": "https://example-journal.org/reviewers"
+    }
+  ],
+  "units": [
+    {
+      "label": "Volume 12 Issue 2",
+      "window_type": "issue",
+      "source_url": "https://example-journal.org/volume-12-issue-2",
+      "research_articles": [
+        {
+          "title": "Article A",
+          "url": "https://example-journal.org/v12i2/article-a",
+          "authors": [
+            "Jane Smith",
+            "Budi Santoso"
+          ]
+        },
+        {
+          "title": "Article B",
+          "url": "https://example-journal.org/v12i2/article-b",
+          "authors": [
+            "Rina Amalia",
+            "Bayu Hadi"
+          ]
+        },
+        {
+          "title": "Article C",
+          "url": "https://example-journal.org/v12i2/article-c",
+          "authors": [
+            "Thomas Lee"
+          ]
+        },
+        {
+          "title": "Article D",
+          "url": "https://example-journal.org/v12i2/article-d",
+          "authors": [
+            "Nadia Yusuf"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Volume 12 Issue 1",
+      "window_type": "issue",
+      "source_url": "https://example-journal.org/volume-12-issue-1",
+      "research_articles": [
+        {
+          "title": "Article E",
+          "url": "https://example-journal.org/v12i1/article-e",
+          "authors": [
+            "L. Putri",
+            "Fajar Maulana"
+          ]
+        },
+        {
+          "title": "Article F",
+          "url": "https://example-journal.org/v12i1/article-f",
+          "authors": [
+            "Nina Kurnia"
+          ]
+        },
+        {
+          "title": "Article G",
+          "url": "https://example-journal.org/v12i1/article-g",
+          "authors": [
+            "Arif Siregar"
+          ]
+        },
+        {
+          "title": "Article H",
+          "url": "https://example-journal.org/v12i1/article-h",
+          "authors": [
+            "Irene Chen"
+          ]
+        }
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "editor_list",
+      "url": "https://example-journal.org/editorial-board",
+      "excerpt": "Editor in Chief: Dr. Jane Smith. Editorial Board includes Asep Rahman.",
+      "locator_hint": "h2 Editorial Board"
+    },
+    {
+      "kind": "reviewer_list",
+      "url": "https://example-journal.org/reviewers",
+      "excerpt": "Annual reviewers include Lina Putri and other invited reviewers.",
+      "locator_hint": "section Annual Reviewers"
+    },
+    {
+      "kind": "issue_listing",
+      "url": "https://example-journal.org/archive",
+      "excerpt": "Latest issues: Volume 12 Issue 2 and Volume 12 Issue 1.",
+      "locator_hint": "Archive list"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/open-access",
+      "excerpt": "This is an open access journal. Users may read, download, copy, distribute, and reuse content under CC BY.",
+      "locator_hint": "open-access-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/peer-review",
+      "excerpt": "All manuscripts undergo double blind peer review by at least two external reviewers.",
+      "locator_hint": "peer-review-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/licensing",
+      "excerpt": "Articles are published under a Creative Commons CC BY 4.0 license.",
+      "locator_hint": "license-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/copyright",
+      "excerpt": "Authors retain copyright and grant the journal a non-exclusive license to publish.",
+      "locator_hint": "copyright-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/apc",
+      "excerpt": "The journal charges an APC of USD 150. Waivers are available for low-income economies.",
+      "locator_hint": "apc-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/publisher",
+      "excerpt": "Publisher: Example University Press. Contact: editor@example-journal.org. Address: City, Country.",
+      "locator_hint": "publisher-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/about",
+      "excerpt": "ISSN (Print): 1234-5679. E-ISSN: 2049-3630.",
+      "locator_hint": "issn-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/aims-and-scope",
+      "excerpt": "Aims and Scope: The journal publishes research articles in information systems and computing topics.",
+      "locator_hint": "aims-scope-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/instructions",
+      "excerpt": "Instructions for Authors: manuscript format, submission steps, ethics, references, and review process.",
+      "locator_hint": "instructions-policy"
+    },
+    {
+      "kind": "policy_text",
+      "url": "https://example-journal.org/editorial-board",
+      "excerpt": "Editorial board members with affiliations are listed on this page.",
+      "locator_hint": "editorial-board-policy"
+    }
+  ],
+  "policy_pages": [
+    {
+      "rule_hint": "open_access_statement",
+      "url": "https://example-journal.org/open-access",
+      "title": "Open Access Policy",
+      "text": "This is an open access journal. All content is freely available without charge. Users are allowed to read, download, copy, distribute, and reuse articles for lawful purposes under the Creative Commons CC BY license."
+    },
+    {
+      "rule_hint": "peer_review_policy",
+      "url": "https://example-journal.org/peer-review",
+      "title": "Peer Review",
+      "text": "All submitted manuscripts are peer reviewed. The journal uses double blind peer review. At least two external reviewers assess each manuscript before editorial decision and acceptance."
+    },
+    {
+      "rule_hint": "license_terms",
+      "url": "https://example-journal.org/licensing",
+      "title": "Licensing Terms",
+      "text": "All articles are published under Creative Commons CC BY 4.0. The license terms are stated on this page and apply to all published content."
+    },
+    {
+      "rule_hint": "copyright_author_rights",
+      "url": "https://example-journal.org/copyright",
+      "title": "Copyright and Rights",
+      "text": "Authors retain copyright for all published works and grant the journal a non-exclusive license to publish and distribute the article."
+    },
+    {
+      "rule_hint": "publication_fees_disclosure",
+      "url": "https://example-journal.org/apc",
+      "title": "Publication Fees",
+      "text": "The journal charges an Article Processing Charge (APC) of USD 150 per accepted manuscript. Fee waivers and discounts are available for eligible authors."
+    },
+    {
+      "rule_hint": "publisher_identity",
+      "url": "https://example-journal.org/publisher",
+      "title": "Publisher Information",
+      "text": "Publisher: Example University Press. Contact: editor@example-journal.org. Address: 123 Journal Street, Research City, Country."
+    },
+    {
+      "rule_hint": "issn_consistency",
+      "url": "https://example-journal.org/about",
+      "title": "About the Journal",
+      "text": "ISSN (Print): 1234-5679. ISSN (Online): 2049-3630."
+    },
+    {
+      "rule_hint": "aims_scope",
+      "url": "https://example-journal.org/aims-and-scope",
+      "title": "Aims and Scope",
+      "text": "Aims and Scope: The journal publishes original research in information systems, software engineering, data science, and digital governance."
+    },
+    {
+      "rule_hint": "instructions_for_authors",
+      "url": "https://example-journal.org/instructions",
+      "title": "Instructions for Authors",
+      "text": "Instructions for Authors: manuscript preparation, submission guidelines, ethical requirements, template usage, and peer review process."
+    },
+    {
+      "rule_hint": "editorial_board",
+      "url": "https://example-journal.org/editorial-board",
+      "title": "Editorial Board",
+      "text": "Editor in Chief: Dr. Jane Smith, Example University. Editorial Board: Asep Rahman, University A; Dwi Prasetyo, Institute B; Lina Putri, University C."
+    }
+  ]
+}

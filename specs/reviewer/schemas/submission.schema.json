@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/submission.schema.json",
+  "title": "DOAJ Reviewer Submission",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "submission_id",
+    "journal_homepage_url",
+    "publication_model",
+    "units",
+    "role_people",
+    "source_urls"
+  ],
+  "properties": {
+    "submission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "journal_homepage_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "publication_model": {
+      "type": "string",
+      "enum": [
+        "issue_based",
+        "continuous"
+      ]
+    },
+    "crawl_timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_urls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "editorial_board",
+        "latest_content"
+      ],
+      "properties": {
+        "editorial_board": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "reviewers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "latest_content": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "archives": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "open_access_statement": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "peer_review_policy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "license_terms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "copyright_author_rights": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "publication_fees_disclosure": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "publisher_identity": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "issn_consistency": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "aims_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "instructions_for_authors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      }
+    },
+    "role_people": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "role",
+          "source_url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "editorial_board_member",
+              "reviewer"
+            ]
+          },
+          "source_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "affiliation": {
+            "type": "string"
+          },
+          "orcid": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "window_type",
+          "source_url",
+          "research_articles"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "window_type": {
+            "type": "string",
+            "enum": [
+              "issue",
+              "calendar_year"
+            ]
+          },
+          "source_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "research_articles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "url",
+                "authors"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "authors": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "article_type": {
+                  "type": "string"
+                },
+                "doi": {
+                  "type": "string"
+                },
+                "published_date": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "url",
+          "excerpt",
+          "locator_hint"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "editor_list",
+              "reviewer_list",
+              "issue_listing",
+              "article_metadata",
+              "policy_text",
+              "crawl_note"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "locator_hint": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "policy_pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_hint",
+          "url",
+          "title",
+          "text"
+        ],
+        "properties": {
+          "rule_hint": {
+            "type": "string",
+            "enum": [
+              "open_access_statement",
+              "peer_review_policy",
+              "license_terms",
+              "copyright_author_rights",
+              "publication_fees_disclosure",
+              "publisher_identity",
+              "issn_consistency",
+              "aims_scope",
+              "editorial_board",
+              "instructions_for_authors"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

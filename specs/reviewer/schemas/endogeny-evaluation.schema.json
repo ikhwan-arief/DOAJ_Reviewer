@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/endogeny-evaluation.schema.json",
+  "title": "Endogeny Evaluation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rule_id",
+    "version",
+    "result",
+    "confidence",
+    "crawl_timestamp_utc",
+    "publication_model",
+    "computed_metrics",
+    "matched_articles",
+    "evidence",
+    "explanation_en",
+    "limitations"
+  ],
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "const": "doaj.endogeny.v1"
+    },
+    "version": {
+      "type": "string"
+    },
+    "result": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail",
+        "need_human_review"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "crawl_timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "publication_model": {
+      "type": "string",
+      "enum": [
+        "issue_based",
+        "continuous",
+        "unknown"
+      ]
+    },
+    "computed_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "units",
+        "max_ratio_observed",
+        "threshold_ratio",
+        "all_units_within_threshold"
+      ],
+      "properties": {
+        "units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "window_type",
+              "research_article_count",
+              "matched_article_count",
+              "ratio"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "window_type": {
+                "type": "string",
+                "enum": [
+                  "issue",
+                  "calendar_year"
+                ]
+              },
+              "research_article_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "matched_article_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "ratio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "max_ratio_observed": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "threshold_ratio": {
+          "type": "number",
+          "const": 0.25
+        },
+        "all_units_within_threshold": {
+          "type": "boolean"
+        }
+      }
+    },
+    "matched_articles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "unit_label",
+          "article_title",
+          "article_url",
+          "matched_author",
+          "matched_role",
+          "matched_person_name",
+          "matching_method",
+          "match_score"
+        ],
+        "properties": {
+          "unit_label": {
+            "type": "string"
+          },
+          "article_title": {
+            "type": "string"
+          },
+          "article_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "matched_author": {
+            "type": "string"
+          },
+          "matched_role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "editorial_board_member",
+              "reviewer"
+            ]
+          },
+          "matched_person_name": {
+            "type": "string"
+          },
+          "matching_method": {
+            "type": "string",
+            "enum": [
+              "exact_normalized_name",
+              "initials_plus_family_name",
+              "fuzzy_name",
+              "orcid_hint",
+              "manual_override"
+            ]
+          },
+          "match_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "person_source_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "url",
+          "excerpt",
+          "locator_hint"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "editor_list",
+              "reviewer_list",
+              "issue_listing",
+              "article_metadata",
+              "policy_text",
+              "crawl_note"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "locator_hint": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "explanation_en": {
+      "type": "string",
+      "minLength": 1
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
