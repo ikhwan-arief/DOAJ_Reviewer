@@ -184,6 +184,28 @@ Useful endpoints:
 - `GET /api/export.csv?limit=all` (download detailed runs CSV: per-rule status, notes, and problematic URLs for flagged results)
 - `GET /runs/<run_id>/<artifact-file>` (download run artifacts)
 
+## Export Report to Word (.docx)
+
+If you want to convert Markdown report to MS Word:
+
+1. Install pandoc (macOS):
+
+```bash
+brew install pandoc
+```
+
+2. Run export script from repository root:
+
+```bash
+./scripts/export_docx.sh
+```
+
+Optional custom input/output:
+
+```bash
+./scripts/export_docx.sh LAPORAN_PROYEK_2026-02-16.md LAPORAN_PROYEK_2026-02-16.docx
+```
+
 ## GitHub Actions
 
 This repository includes:
