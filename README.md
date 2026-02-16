@@ -242,5 +242,6 @@ Manual workflow can process a submission file from the repository and upload:
 ## License
 
 - Source code: `PolyForm Noncommercial License 1.0.0` (see `LICENSE`).
+- Copyright holder: `Ikhwan Arief (ikhwan@unand.ac.id)`.
 - Commercial use is not permitted without separate permission from the copyright holder.
 - Documentation files are intended for non-commercial use under `CC BY-NC 4.0`, unless stated otherwise.
