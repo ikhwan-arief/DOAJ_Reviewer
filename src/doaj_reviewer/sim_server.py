@@ -639,7 +639,11 @@ def _html_page() -> str:
         <div><label>9. Aims / Focus and Scope URL(s) (required)</label><textarea id="aims_scope"></textarea></div>
         <div><label>10. Editorial board URL(s) (required)</label><textarea id="editorial_board"></textarea></div>
         <div><label>11. Reviewer list URL(s) (optional)</label><textarea id="reviewers"></textarea></div>
-        <div><label>12. Latest issue URL(s) for endogeny (required, latest 2 issues)</label><textarea id="latest_content"></textarea></div>
+        <div>
+          <label>12. Latest issue URL(s) for endogeny (required, latest 2 issues; one URL per line, newest first)</label>
+          <textarea id="latest_content" placeholder="https://example-journal.org/volume-12-issue-2&#10;https://example-journal.org/volume-12-issue-1"></textarea>
+          <div style="font-size:12px;color:#5b6474;margin-top:4px;">Line 1 = latest issue, line 2 = previous issue. For continuous model, provide content/archive URLs covering the last calendar year.</div>
+        </div>
         <div><label>13. Instructions for authors URL(s) (required)</label><textarea id="instructions_for_authors"></textarea></div>
         <div><label>14. Publication fee/APC URL(s) (required)</label><textarea id="publication_fees_disclosure"></textarea></div>
         <div><label>15. Archiving policy URL(s) (optional)</label><textarea id="archiving_policy"></textarea></div>
@@ -663,9 +667,9 @@ def _html_page() -> str:
         <div><label>Instructions for authors manual text</label><textarea id="manual_text_instructions_for_authors"></textarea><label>Instructions PDF (optional)</label><input id="manual_pdf_instructions_for_authors" type="file" accept=".pdf,application/pdf"></div>
       </div>
       <div class="actions">
-        <button id="fillSample" class="secondary">Fill sample</button>
-        <button id="resetBtn" class="secondary">Reset form</button>
-        <button id="submitBtn">Run simulation</button>
+        <button id="fillSample" type="button" class="secondary">Fill sample</button>
+        <button id="resetBtn" type="button" class="secondary">Reset form</button>
+        <button id="submitBtn" type="button">Run simulation</button>
       </div>
     </div>
     <div class="card">
@@ -673,8 +677,8 @@ def _html_page() -> str:
       <div id="status" class="muted">No run yet.</div>
       <div id="warnings" class="muted"></div>
       <div class="result-actions">
-        <button id="printPdfBtn" class="secondary" disabled>Print to PDF</button>
-        <button id="downloadTxtBtn" class="secondary" disabled>Download text</button>
+        <button id="printPdfBtn" type="button" class="secondary" disabled>Print to PDF</button>
+        <button id="downloadTxtBtn" type="button" class="secondary" disabled>Download text</button>
       </div>
       <div id="artifacts" class="artifacts"></div>
       <div id="checks"></div>
@@ -990,18 +994,69 @@ document.getElementById("downloadTxtBtn").addEventListener("click", () => {
 });
 
 document.getElementById("submitBtn").addEventListener("click", async () => {
-  setStatus("Running simulation...");
-  document.getElementById("checks").innerHTML = "";
-  document.getElementById("warnings").innerHTML = "";
-  const payload = await payloadFromForm();
-  const res = await fetch("/api/submit", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  renderResult(data);
-  await loadRuns();
+  const submitBtn = document.getElementById("submitBtn");
+  if (submitBtn.disabled) return;
+
+  const originalLabel = submitBtn.textContent || "Run simulation";
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Running...";
+
+  const controller = new AbortController();
+  const timeoutMs = 5 * 60 * 1000;
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    setStatus("Running simulation... this can take up to 5 minutes for JS-heavy or WAF-protected sites.");
+    document.getElementById("checks").innerHTML = "";
+    document.getElementById("warnings").innerHTML = "";
+
+    const payload = await payloadFromForm();
+    const res = await fetch("/api/submit", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    const rawText = await res.text();
+    let data = {};
+    try {
+      data = JSON.parse(rawText || "{}");
+    } catch (_) {
+      data = {
+        ok: false,
+        errors: [`Server returned non-JSON response (HTTP ${res.status}).`]
+      };
+    }
+
+    if (!res.ok && !data.ok) {
+      const err = data.errors || [`HTTP ${res.status}`];
+      renderResult({
+        ok: false,
+        errors: err,
+        warnings: data.warnings || [],
+        artifacts: data.artifacts || {}
+      });
+      return;
+    }
+
+    renderResult(data);
+    await loadRuns();
+  } catch (err) {
+    const message = (err && err.name === "AbortError")
+      ? "Simulation request timed out after 5 minutes. Try fewer URLs or run again."
+      : ("Simulation request failed: " + (err && err.message ? err.message : "unknown error"));
+    renderResult({
+      ok: false,
+      errors: [message],
+      warnings: [],
+      artifacts: {}
+    });
+  } finally {
+    clearTimeout(timeoutHandle);
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
+  }
 });
 
 setResultActions(false);
