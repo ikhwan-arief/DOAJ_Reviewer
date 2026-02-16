@@ -148,6 +148,22 @@ UAT output includes:
 - `uat-report.md`
 - per-scenario artifacts (`review-summary.json/.md/.txt`, `endogeny-result.json`)
 
+Run golden regression dataset (deterministic multi-case assertions):
+
+```bash
+PYTHONPATH=src python -m doaj_reviewer.golden \
+  --output-dir /tmp/doaj-golden \
+  --cases specs/reviewer/golden/golden-cases.v1.json \
+  --ruleset specs/reviewer/rules/ruleset.must.v1.json \
+  --base-submission examples/submission.example.json
+```
+
+Golden output includes:
+
+- `golden-report.json`
+- `golden-report.md`
+- per-case artifacts (`submission.structured.json`, `review-summary.json/.md/.txt`, `endogeny-result.json`, `assertion-result.json`)
+
 ## Simulation Web App
 
 Start local simulation server:
@@ -175,6 +191,7 @@ This repository includes:
 - `CI` workflow on push/pull_request (`.github/workflows/ci.yml`)
 - manual review workflow (`.github/workflows/review-submission.yml`)
 - manual UAT workflow (`.github/workflows/uat-scenarios.yml`)
+- manual golden regression workflow (`.github/workflows/golden-regression.yml`)
 
 Manual workflow can process a submission file from the repository and upload:
 

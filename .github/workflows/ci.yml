@@ -58,6 +58,11 @@ jobs:
             --output-dir /tmp/doaj-uat \
             --ruleset specs/reviewer/rules/ruleset.must.v1.json \
             --base-submission examples/submission.example.json
+          python -m doaj_reviewer.golden \
+            --output-dir /tmp/doaj-golden \
+            --cases specs/reviewer/golden/golden-cases.v1.json \
+            --ruleset specs/reviewer/rules/ruleset.must.v1.json \
+            --base-submission examples/submission.example.json
 
       - name: Run unit tests
         env:

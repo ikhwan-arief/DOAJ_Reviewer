@@ -28,6 +28,11 @@ All notable updates to this repository are listed here.
 - Added UAT tests and artifact report generation (`uat-report.json` and `uat-report.md`).
 - Added manual GitHub Actions workflow for UAT (`.github/workflows/uat-scenarios.yml`).
 - Added CI smoke check for UAT command.
+- Added deterministic golden regression runner (`python -m doaj_reviewer.golden`) with multi-case assertions.
+- Added curated golden case definitions in `specs/reviewer/golden/golden-cases.v1.json`.
+- Added golden regression test suite (`tests/test_golden_dataset.py`).
+- Added manual GitHub Actions workflow for golden regression (`.github/workflows/golden-regression.yml`).
+- Added CI smoke check for golden regression command.
 
 ## 2026-02-15
 

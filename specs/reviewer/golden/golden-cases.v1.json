@@ -1,0 +1,118 @@
+{
+  "dataset_id": "doaj.golden.v1",
+  "version": "1.0.0",
+  "description": "Deterministic regression dataset for must-rule and endogeny behavior.",
+  "cases": [
+    {
+      "id": "G1_PASS_BASELINE",
+      "scenario": "baseline_pass",
+      "expected": {
+        "overall_result": "pass",
+        "must": {
+          "doaj.open_access_statement.v1": "pass",
+          "doaj.peer_review_policy.v1": "pass",
+          "doaj.license_terms.v1": "pass",
+          "doaj.endogeny.v1": "pass"
+        }
+      }
+    },
+    {
+      "id": "G2_NEED_HUMAN_WAF_OPEN_ACCESS",
+      "scenario": "oa_waf_blocked",
+      "expected": {
+        "overall_result": "need_human_review",
+        "must": {
+          "doaj.open_access_statement.v1": "need_human_review",
+          "doaj.endogeny.v1": "pass"
+        }
+      }
+    },
+    {
+      "id": "G3_FAIL_LICENSE_RESTRICTIVE",
+      "scenario": "license_restrictive_fail",
+      "expected": {
+        "overall_result": "fail",
+        "must": {
+          "doaj.license_terms.v1": "fail"
+        }
+      }
+    },
+    {
+      "id": "G4_FAIL_ISSN_INVALID_ELECTRONIC",
+      "scenario": "issn_invalid_electronic_fail",
+      "expected": {
+        "overall_result": "fail",
+        "must": {
+          "doaj.issn_consistency.v1": "fail"
+        }
+      }
+    },
+    {
+      "id": "G5_NEED_HUMAN_PEER_REVIEW_NO_TWO",
+      "scenario": "peer_review_missing_two",
+      "expected": {
+        "overall_result": "need_human_review",
+        "must": {
+          "doaj.peer_review_policy.v1": "need_human_review"
+        }
+      }
+    },
+    {
+      "id": "G6_NEED_HUMAN_AIMS_SCOPE_ONLY",
+      "scenario": "aims_scope_scope_only",
+      "expected": {
+        "overall_result": "need_human_review",
+        "must": {
+          "doaj.aims_scope.v1": "need_human_review"
+        }
+      }
+    },
+    {
+      "id": "G7_FAIL_REVIEWER_COMPOSITION",
+      "scenario": "reviewer_composition_fail",
+      "expected": {
+        "overall_result": "fail",
+        "must": {
+          "doaj.editorial_board.v1": "fail"
+        }
+      }
+    },
+    {
+      "id": "G8_NEED_HUMAN_ENDOGENY_CONTINUOUS_UNDER_MIN",
+      "scenario": "continuous_under_minimum_articles",
+      "expected": {
+        "overall_result": "need_human_review",
+        "must": {
+          "doaj.endogeny.v1": "need_human_review"
+        },
+        "endogeny_result": "need_human_review"
+      }
+    },
+    {
+      "id": "G9_FAIL_ENDOGENY_ISSUE_OVER_THRESHOLD",
+      "scenario": "issue_endogeny_over_threshold",
+      "expected": {
+        "overall_result": "fail",
+        "must": {
+          "doaj.endogeny.v1": "fail"
+        },
+        "endogeny_result": "fail"
+      }
+    },
+    {
+      "id": "G10_PASS_OPTIONAL_NOT_PROVIDED",
+      "scenario": "optional_policies_missing",
+      "expected": {
+        "overall_result": "pass",
+        "must": {
+          "doaj.endogeny.v1": "pass"
+        },
+        "supplementary": {
+          "doaj.plagiarism_policy.v1": "not_provided",
+          "doaj.archiving_policy.v1": "not_provided",
+          "doaj.repository_policy.v1": "not_provided"
+        }
+      }
+    }
+  ]
+}

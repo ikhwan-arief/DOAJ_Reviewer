@@ -1,0 +1,51 @@
+name: Run Golden Regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases_path:
+        description: Path to golden case definition JSON in this repository
+        required: true
+        default: specs/reviewer/golden/golden-cases.v1.json
+      ruleset_path:
+        description: Path to ruleset JSON in this repository
+        required: true
+        default: specs/reviewer/rules/ruleset.must.v1.json
+      base_submission_path:
+        description: Path to base structured submission JSON in this repository
+        required: true
+        default: examples/submission.example.json
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run golden regression dataset
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p artifacts/golden
+          python -m doaj_reviewer.golden \
+            --output-dir artifacts/golden \
+            --cases "${{ github.event.inputs.cases_path }}" \
+            --ruleset "${{ github.event.inputs.ruleset_path }}" \
+            --base-submission "${{ github.event.inputs.base_submission_path }}"
+          cat artifacts/golden/golden-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload golden artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: doaj-golden-report
+          path: artifacts/golden/
