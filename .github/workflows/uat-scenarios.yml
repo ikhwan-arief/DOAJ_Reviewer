@@ -1,0 +1,46 @@
+name: Run UAT Scenarios
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruleset_path:
+        description: Path to ruleset JSON file in this repository
+        required: true
+        default: specs/reviewer/rules/ruleset.must.v1.json
+      base_submission_path:
+        description: Path to base structured submission JSON in this repository
+        required: true
+        default: examples/submission.example.json
+
+permissions:
+  contents: read
+
+jobs:
+  uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run deterministic UAT scenarios
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p artifacts/uat
+          python -m doaj_reviewer.uat \
+            --output-dir artifacts/uat \
+            --ruleset "${{ github.event.inputs.ruleset_path }}" \
+            --base-submission "${{ github.event.inputs.base_submission_path }}"
+          cat artifacts/uat/uat-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload UAT artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: doaj-uat-report
+          path: artifacts/uat/

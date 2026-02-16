@@ -133,6 +133,21 @@ PYTHONPATH=src python -m doaj_reviewer.spreadsheet_batch \
   --convert-only
 ```
 
+Run deterministic UAT scenarios (3 baseline checks):
+
+```bash
+PYTHONPATH=src python -m doaj_reviewer.uat \
+  --output-dir /tmp/doaj-uat \
+  --ruleset specs/reviewer/rules/ruleset.must.v1.json \
+  --base-submission examples/submission.example.json
+```
+
+UAT output includes:
+
+- `uat-report.json`
+- `uat-report.md`
+- per-scenario artifacts (`review-summary.json/.md/.txt`, `endogeny-result.json`)
+
 ## Simulation Web App
 
 Start local simulation server:
@@ -159,6 +174,7 @@ This repository includes:
 
 - `CI` workflow on push/pull_request (`.github/workflows/ci.yml`)
 - manual review workflow (`.github/workflows/review-submission.yml`)
+- manual UAT workflow (`.github/workflows/uat-scenarios.yml`)
 
 Manual workflow can process a submission file from the repository and upload:
 

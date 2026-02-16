@@ -54,6 +54,10 @@ jobs:
             --input-csv examples/submissions_batch.template.csv \
             --output-dir /tmp/doaj-batch \
             --convert-only
+          python -m doaj_reviewer.uat \
+            --output-dir /tmp/doaj-uat \
+            --ruleset specs/reviewer/rules/ruleset.must.v1.json \
+            --base-submission examples/submission.example.json
 
       - name: Run unit tests
         env:

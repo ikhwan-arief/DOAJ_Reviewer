@@ -24,6 +24,10 @@ All notable updates to this repository are listed here.
 - Enforced reviewer composition separately from editorial board composition.
 - Treated editorial board composition as informational (no hard threshold).
 - Aligned endogeny and must/non-must handling with discussed requirements.
+- Added deterministic UAT scenario runner (`python -m doaj_reviewer.uat`) with three baseline scenarios.
+- Added UAT tests and artifact report generation (`uat-report.json` and `uat-report.md`).
+- Added manual GitHub Actions workflow for UAT (`.github/workflows/uat-scenarios.yml`).
+- Added CI smoke check for UAT command.
 
 ## 2026-02-15
 
