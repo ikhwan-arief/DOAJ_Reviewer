@@ -726,11 +726,11 @@ let latestResult = null;
 
 function escapeHtml(value) {
   return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function setResultActions(enabled) {
@@ -739,6 +739,10 @@ function setResultActions(enabled) {
 }
 
 function badge(result) { return '<span class="badge '+result+'">'+result+'</span>'; }
+
+function safeValue(value) {
+  return value === null || value === undefined ? "" : value;
+}
 
 function getFieldValue(id) {
   const el = document.getElementById(id);
@@ -851,7 +855,7 @@ function buildPlainTextResult(data) {
   checks.forEach((item, idx) => {
     lines.push((idx + 1) + ". Rule ID    : " + (item.rule_id || ""));
     lines.push("   Result     : " + (item.result || ""));
-    lines.push("   Confidence : " + (item.confidence ?? ""));
+    lines.push("   Confidence : " + safeValue(item.confidence));
     lines.push("   Notes      : " + (item.notes || ""));
     lines.push("");
   });
@@ -862,7 +866,7 @@ function buildPlainTextResult(data) {
     supplementary.forEach((item, idx) => {
       lines.push((idx + 1) + ". Rule ID    : " + (item.rule_id || ""));
       lines.push("   Result     : " + (item.result || ""));
-      lines.push("   Confidence : " + (item.confidence ?? ""));
+      lines.push("   Confidence : " + safeValue(item.confidence));
       lines.push("   Notes      : " + (item.notes || ""));
       lines.push("");
     });
@@ -872,10 +876,10 @@ function buildPlainTextResult(data) {
 
 function buildPrintableHtml(data) {
   const mustRows = (data.checks || []).map(item =>
-    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(item.confidence ?? "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
+    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(safeValue(item.confidence))}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
   ).join("");
   const suppRows = (data.supplementary_checks || []).map(item =>
-    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(item.confidence ?? "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
+    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(safeValue(item.confidence))}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
   ).join("");
   const warnings = (data.warnings || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
   return `<!doctype html>
