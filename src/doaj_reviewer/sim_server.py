@@ -740,6 +740,12 @@ function setResultActions(enabled) {
 
 function badge(result) { return '<span class="badge '+result+'">'+result+'</span>'; }
 
+function getFieldValue(id) {
+  const el = document.getElementById(id);
+  if (!el) throw new Error("UI field not found: " + id);
+  return el.value || "";
+}
+
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -757,10 +763,12 @@ function readFileAsBase64(file) {
 
 async function payloadFromForm() {
   const body = {};
-  for (const id of fields) body[id] = document.getElementById(id).value || "";
+  for (const id of fields) body[id] = getFieldValue(id);
   const manual_policy_pages = [];
   for (const hint of manualPolicyHints) {
-    const textValue = (document.getElementById("manual_text_" + hint).value || "").trim();
+    const textEl = document.getElementById("manual_text_" + hint);
+    if (!textEl) throw new Error("Manual text field not found: manual_text_" + hint);
+    const textValue = (textEl.value || "").trim();
     if (textValue) {
       manual_policy_pages.push({
         rule_hint: hint,
@@ -791,6 +799,16 @@ async function payloadFromForm() {
 }
 
 function setStatus(text) { document.getElementById("status").textContent = text; }
+
+window.addEventListener("error", (event) => {
+  const msg = event && event.message ? event.message : "unknown UI error";
+  setStatus("UI error: " + msg);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event && event.reason ? (event.reason.message || String(event.reason)) : "unknown async error";
+  setStatus("UI async error: " + reason);
+});
 
 function resetForm() {
   for (const id of fields) {
