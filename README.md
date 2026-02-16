@@ -42,16 +42,22 @@ The aggregate decision in `review-summary.json` follows:
 Current automatic evaluators:
 
 - `doaj.open_access_statement.v1`
+- `doaj.issn_consistency.v1`
+- `doaj.publisher_identity.v1`
+- `doaj.license_terms.v1`
+- `doaj.copyright_author_rights.v1`
+- `doaj.peer_review_policy.v1`
 - `doaj.aims_scope.v1`
 - `doaj.editorial_board.v1`
 - `doaj.instructions_for_authors.v1`
-- `doaj.peer_review_policy.v1`
-- `doaj.license_terms.v1`
-- `doaj.copyright_author_rights.v1`
 - `doaj.publication_fees_disclosure.v1`
-- `doaj.publisher_identity.v1`
-- `doaj.issn_consistency.v1`
 - `doaj.endogeny.v1`
+
+Supplementary (non-must) checks:
+
+- `doaj.plagiarism_policy.v1`
+- `doaj.archiving_policy.v1`
+- `doaj.repository_policy.v1`
 
 Endogeny rule follows DOAJ threshold logic:
 
@@ -126,6 +132,9 @@ PYTHONPATH=src python -m doaj_reviewer.sim_server --host 127.0.0.1 --port 8787
 Open:
 
 - `http://127.0.0.1:8787`
+- Result panel supports:
+  - `Print to PDF` (browser print dialog, user chooses Save as PDF + target folder)
+  - `Download text` (plain `.txt` summary file for current simulation result)
 
 Useful endpoints:
 
@@ -148,7 +157,11 @@ Manual workflow can process a submission file from the repository and upload:
 
 ## Notes and Limitations
 
+- Current implementation is deterministic rule-based evaluation (heuristic NLP + regex patterns), without external LLM APIs.
 - JS-heavy pages are supported via Playwright (`js_mode=auto|on`) when Playwright is installed.
+- WAF/anti-bot challenge pages (Cloudflare/Akamai/etc.) are detected and routed to `need_human_review` with explicit notes.
+- Intake applies per-domain throttling and exponential retries to reduce blocking/rate-limit failures.
+- Simulation UI includes manual fallback: paste policy text and optional per-policy PDF upload when URL crawling is blocked.
 - If Python TLS verification fails locally, fetcher retries once using insecure TLS (skip-verify).
 - Some journals may still require manual review due to anti-bot controls, auth walls, or ambiguous policy wording.
 

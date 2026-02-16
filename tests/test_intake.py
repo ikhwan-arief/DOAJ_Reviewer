@@ -194,6 +194,63 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(total_articles, 3)
         self.assertEqual(len(structured["policy_pages"]), 10)
 
+    def test_manual_policy_text_used_when_waf_blocks_url(self) -> None:
+        waf_doc = parse_html(
+            url="https://journal.example/open-access",
+            status_code=503,
+            content_type="text/html",
+            html="""
+            <html><head><title>Just a moment...</title></head>
+            <body>
+              <h1>Checking your browser before accessing</h1>
+              <p>Cloudflare</p>
+            </body></html>
+            """,
+        )
+
+        def fake_fetcher(url: str, timeout_seconds: int = 18):
+            _ = timeout_seconds
+            if url == "https://journal.example/open-access":
+                return waf_doc
+            raise RuntimeError(f"missing fixture for {url}")
+
+        raw_submission = {
+            "submission_id": "RAW-WAF",
+            "journal_homepage_url": "https://journal.example",
+            "publication_model": "issue_based",
+            "source_urls": {
+                "open_access_statement": ["https://journal.example/open-access"],
+                "latest_content": [],
+                "editorial_board": [],
+                "reviewers": [],
+                "archives": [],
+            },
+            "manual_policy_pages": [
+                {
+                    "rule_hint": "open_access_statement",
+                    "url": "manual://open_access_statement/text",
+                    "title": "Manual OA",
+                    "text": "This journal is open access and allows reading and reuse under CC BY.",
+                }
+            ],
+        }
+
+        structured = build_structured_submission_from_raw(raw_submission, fetcher=fake_fetcher)
+        self.assertTrue(
+            any(
+                page.get("rule_hint") == "open_access_statement"
+                and str(page.get("url", "")).startswith("manual://open_access_statement")
+                for page in structured["policy_pages"]
+            )
+        )
+        self.assertTrue(
+            any(
+                item.get("locator_hint") == "policy-waf-blocked-open_access_statement"
+                for item in structured["evidence"]
+                if isinstance(item, dict)
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

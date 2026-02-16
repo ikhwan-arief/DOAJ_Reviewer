@@ -5,6 +5,44 @@ from __future__ import annotations
 import re
 from typing import Any
 
+INSTITUTION_KEYWORDS = (
+    "university",
+    "institute",
+    "department",
+    "faculty",
+    "school",
+    "college",
+    "hospital",
+    "center",
+    "centre",
+    "academy",
+    "press",
+    "laboratory",
+    "research",
+)
+
+LICENSE_PATTERNS = {
+    "CC BY": r"\bcc\s*by\b",
+    "CC BY-SA": r"\bcc\s*by\s*-\s*sa\b",
+    "CC BY-ND": r"\bcc\s*by\s*-\s*nd\b",
+    "CC BY-NC": r"\bcc\s*by\s*-\s*nc\b",
+    "CC BY-NC-SA": r"\bcc\s*by\s*-\s*nc\s*-\s*sa\b",
+    "CC BY-NC-ND": r"\bcc\s*by\s*-\s*nc\s*-\s*nd\b",
+    "CC0": r"\bcc0\b",
+    "Public domain": r"\bpublic domain\b",
+    "Publisher's own license": r"\bpublisher'?s?\s+own\s+licen[sc]e\b",
+}
+
+PEER_REVIEW_TYPE_PATTERNS = {
+    "Editorial review": r"\beditorial review\b",
+    "Peer review": r"\bpeer review\b",
+    "Anonymous peer review": r"\banonymous peer review\b|\bsingle blind\b|\bblind peer review\b",
+    "Double anonymous peer review": r"\bdouble anonymous peer review\b|\bdouble blind\b",
+    "Post-publication peer review": r"\bpost-?publication peer review\b",
+    "Open peer review": r"\bopen peer review\b",
+    "Other": r"\bother review\b",
+}
+
 
 def _get_policy_urls(submission: dict[str, Any], rule_hint: str) -> list[str]:
     source_urls = submission.get("source_urls", {})
@@ -59,8 +97,40 @@ def _count_any(text: str, patterns: list[str]) -> int:
     return count
 
 
-def _missing_policy_result(rule_id: str, rule_hint: str) -> dict[str, Any]:
+def _waf_block_notes(submission: dict[str, Any], rule_hint: str) -> list[str]:
+    evidence = submission.get("evidence", [])
+    if not isinstance(evidence, list):
+        return []
+    waf_locator = f"policy-waf-blocked-{rule_hint}"
+    out: list[str] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("kind", "")) != "crawl_note":
+            continue
+        locator = str(item.get("locator_hint", ""))
+        if locator != waf_locator:
+            continue
+        excerpt = str(item.get("excerpt", "")).strip()
+        if excerpt:
+            out.append(excerpt)
+    return out
+
+
+def _missing_policy_result(rule_id: str, rule_hint: str, submission: dict[str, Any]) -> dict[str, Any]:
     # The caller may still add evidence URLs from source_urls in the returned object.
+    waf_notes = _waf_block_notes(submission, rule_hint)
+    if waf_notes:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.42,
+            "notes": (
+                f"Policy URL appears blocked by WAF/anti-bot challenge for `{rule_hint}`. "
+                f"Use manual fallback text/PDF and human review. {waf_notes[0]}"
+            ),
+            "evidence_urls": [],
+        }
     return {
         "rule_id": rule_id,
         "result": "need_human_review",
@@ -70,12 +140,83 @@ def _missing_policy_result(rule_id: str, rule_hint: str) -> dict[str, Any]:
     }
 
 
+def _clean_text_value(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip(" -,:;|()[]")
+
+
+def _extract_publisher_name_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    patterns = [
+        r"\bpublished by\s*[:\-]?\s*([^\n\.]{4,100})",
+        r"\bpublisher\s*[:\-]?\s*([^\n\.]{4,100})",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            name = _clean_text_value(match.group(1))
+            if len(name) < 4:
+                continue
+            if name.lower().startswith(("contact", "address", "email")):
+                continue
+            if name not in candidates:
+                candidates.append(name)
+    return candidates
+
+
+def _publisher_signatures(submission: dict[str, Any]) -> set[str]:
+    pages = _get_policy_pages(submission, "publisher_identity")
+    signatures: set[str] = set()
+    for page in pages:
+        blob = f"{page.get('title', '')}\n{page.get('text', '')}"
+        for name in _extract_publisher_name_candidates(blob):
+            normalized = re.sub(r"[^a-z0-9 ]", " ", name.lower())
+            normalized = re.sub(r"\s+", " ", normalized).strip()
+            for token in normalized.split():
+                if len(token) >= 4:
+                    signatures.add(token)
+    return signatures
+
+
+def _is_same_as_publisher(affiliation: str, publisher_signatures: set[str]) -> bool | None:
+    value = _clean_text_value(affiliation).lower()
+    if not value:
+        return None
+    if not any(keyword in value for keyword in INSTITUTION_KEYWORDS):
+        return None
+    words = {token for token in re.sub(r"[^a-z0-9 ]", " ", value).split() if len(token) >= 4}
+    if not words:
+        return None
+    if not publisher_signatures:
+        return None
+    return bool(words & publisher_signatures)
+
+
+def _count_group_affiliation_composition(
+    people: list[dict[str, Any]], publisher_signatures: set[str]
+) -> tuple[int, int, int]:
+    same = 0
+    outside = 0
+    unknown = 0
+    for item in people:
+        affiliation = _clean_text_value(str(item.get("affiliation", "")))
+        if not affiliation:
+            unknown += 1
+            continue
+        same_flag = _is_same_as_publisher(affiliation, publisher_signatures)
+        if same_flag is True:
+            same += 1
+        elif same_flag is False:
+            outside += 1
+        else:
+            unknown += 1
+    return same, outside, unknown
+
+
 def evaluate_open_access_statement(submission: dict[str, Any]) -> dict[str, Any]:
     rule_id = "doaj.open_access_statement.v1"
     rule_hint = "open_access_statement"
     pages = _get_policy_pages(submission, rule_hint)
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = _get_policy_urls(submission, rule_hint)
         return missing
 
@@ -158,7 +299,7 @@ def evaluate_peer_review_policy(submission: dict[str, Any]) -> dict[str, Any]:
     rule_hint = "peer_review_policy"
     pages = _get_policy_pages(submission, rule_hint)
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = _get_policy_urls(submission, rule_hint)
         return missing
 
@@ -169,10 +310,12 @@ def evaluate_peer_review_policy(submission: dict[str, Any]) -> dict[str, Any]:
         r"\bpeer review\b",
         r"\bpeer-reviewed\b",
         r"\bdouble blind\b",
+        r"\bdouble anonymous\b",
         r"\bsingle blind\b",
         r"\banonymous peer review\b",
         r"\bopen peer review\b",
-        r"\bexternal reviewer",
+        r"\bexternal reviewer\b",
+        r"\bblind peer review\b",
     ]
     process_signals = [
         r"\breview process\b",
@@ -182,11 +325,18 @@ def evaluate_peer_review_policy(submission: dict[str, Any]) -> dict[str, Any]:
         r"\bmanuscript\b",
         r"\bacceptance\b",
     ]
+    min_two_reviewer_signals = [
+        r"\bat least\s+2\s+(independent\s+)?reviewers?\b",
+        r"\bminimum\s+of\s+2\s+(independent\s+)?reviewers?\b",
+        r"\btwo\s+(\w+\s+){0,2}reviewers?\b",
+        r"\b2\s+(\w+\s+){0,2}reviewers?\b",
+        r"\breviewed\s+by\s+at\s+least\s+two\b",
+    ]
     fail_signals = [
         r"\bnot peer reviewed\b",
         r"\bno peer review\b",
     ]
-    editorial_only_signal = r"\beditorial review only\b"
+    editorial_only_signal = r"\beditorial review only\b|\beditorial review\b"
 
     if _contains_any(text, fail_signals):
         return {
@@ -200,14 +350,30 @@ def evaluate_peer_review_policy(submission: dict[str, Any]) -> dict[str, Any]:
     has_peer_review = _contains_any(text, peer_review_signals)
     process_count = _count_any(text, process_signals)
     editorial_only = _contains_any(text, [editorial_only_signal])
+    has_min_two = _contains_any(text, min_two_reviewer_signals)
+    detected_types = [
+        review_type
+        for review_type, pattern in PEER_REVIEW_TYPE_PATTERNS.items()
+        if re.search(pattern, text, flags=re.IGNORECASE)
+    ]
+    types_text = ", ".join(detected_types[:4]) if detected_types else "not specified"
 
-    if has_peer_review and process_count >= 1:
-        confidence = 0.8 if process_count >= 2 else 0.72
+    if has_peer_review and process_count >= 1 and has_min_two:
+        confidence = 0.84 if process_count >= 2 else 0.76
         return {
             "rule_id": rule_id,
             "result": "pass",
             "confidence": confidence,
-            "notes": "Peer review policy is present with review process details.",
+            "notes": f"Peer review policy is present. Detected type(s): {types_text}. Policy states at least two reviewers per article.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if has_peer_review and not has_min_two:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.61,
+            "notes": f"Peer review type(s) detected ({types_text}) but no explicit statement of at least two reviewers per article.",
             "evidence_urls": evidence_urls,
         }
 
@@ -216,7 +382,7 @@ def evaluate_peer_review_policy(submission: dict[str, Any]) -> dict[str, Any]:
             "rule_id": rule_id,
             "result": "need_human_review",
             "confidence": 0.52,
-            "notes": "Only editorial review wording detected; this may require discipline-specific manual assessment.",
+            "notes": "Only editorial review wording detected; policy needs manual assessment (arts/humanities exception may apply).",
             "evidence_urls": evidence_urls,
         }
 
@@ -224,7 +390,7 @@ def evaluate_peer_review_policy(submission: dict[str, Any]) -> dict[str, Any]:
         "rule_id": rule_id,
         "result": "need_human_review",
         "confidence": 0.56,
-        "notes": "Peer review policy is missing or too vague for automatic pass/fail.",
+        "notes": f"Peer review policy is missing or too vague for automatic pass/fail. Detected type(s): {types_text}.",
         "evidence_urls": evidence_urls,
     }
 
@@ -234,7 +400,7 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
     rule_hint = "license_terms"
     pages = _get_policy_pages(submission, rule_hint)
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = _get_policy_urls(submission, rule_hint)
         return missing
 
@@ -243,12 +409,7 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
 
     cc_signals = [
         r"\bcreative commons\b",
-        r"\bcc by\b",
-        r"\bcc by-sa\b",
-        r"\bcc by-nd\b",
-        r"\bcc by-nc\b",
-        r"\bcc by-nc-sa\b",
-        r"\bcc by-nc-nd\b",
+        r"\bcc\b",
         r"\bcc0\b",
         r"\bpublic domain\b",
     ]
@@ -268,6 +429,8 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
     has_publisher_license = _contains_any(text, publisher_license_signals)
     has_negative = _contains_any(text, negative_signals)
     all_rights_reserved = _contains_any(text, [r"\ball rights reserved\b"])
+    detected = [name for name, pattern in LICENSE_PATTERNS.items() if re.search(pattern, text, flags=re.IGNORECASE)]
+    detected_text = ", ".join(detected[:5]) if detected else "none"
 
     if has_negative or (all_rights_reserved and cc_count == 0 and not has_publisher_license):
         return {
@@ -275,6 +438,16 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
             "result": "fail",
             "confidence": 0.86,
             "notes": "License policy appears restrictive or missing open licensing terms.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if detected:
+        confidence = 0.86 if len(detected) >= 2 else 0.8
+        return {
+            "rule_id": rule_id,
+            "result": "pass",
+            "confidence": confidence,
+            "notes": f"Detected license option(s): {detected_text}.",
             "evidence_urls": evidence_urls,
         }
 
@@ -301,7 +474,7 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
         "rule_id": rule_id,
         "result": "need_human_review",
         "confidence": 0.55,
-        "notes": "License wording is present but not specific enough for automatic pass/fail.",
+        "notes": f"License wording exists but the allowed DOAJ options were not clearly identified (detected: {detected_text}).",
         "evidence_urls": evidence_urls,
     }
 
@@ -314,7 +487,7 @@ def evaluate_copyright_author_rights(submission: dict[str, Any]) -> dict[str, An
         # Fallback: many journals place author-rights wording on licensing pages.
         pages = _get_policy_pages(submission, "license_terms")
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = (
             _get_policy_urls(submission, rule_hint) or _get_policy_urls(submission, "license_terms")
         )
@@ -385,7 +558,7 @@ def evaluate_publication_fees_disclosure(submission: dict[str, Any]) -> dict[str
         # Fallback pages often used for fee statements.
         pages = _get_policy_pages(submission, "open_access_statement") + _get_policy_pages(submission, "license_terms")
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = (
             _get_policy_urls(submission, rule_hint)
             or _get_policy_urls(submission, "open_access_statement")
@@ -489,7 +662,7 @@ def evaluate_publisher_identity(submission: dict[str, Any]) -> dict[str, Any]:
             + _get_policy_pages(submission, "license_terms")
         )
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = (
             _get_policy_urls(submission, rule_hint)
             or _get_policy_urls(submission, "open_access_statement")
@@ -587,6 +760,23 @@ def _extract_issns(text: str) -> list[str]:
     return sorted(set(match.upper() for match in re.findall(r"\b\d{4}-\d{3}[0-9Xx]\b", text)))
 
 
+def _extract_issn_mentions(text: str) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for match in re.finditer(r"\b\d{4}-\d{3}[0-9Xx]\b", text):
+        issn = match.group(0).upper()
+        start = max(0, match.start() - 45)
+        end = min(len(text), match.end() + 45)
+        context = text[start:end]
+        low = context.lower()
+        category = "unknown"
+        if re.search(r"\b(e[-\s]?issn|online|electronic)\b", low):
+            category = "electronic"
+        elif re.search(r"\b(p[-\s]?issn|print)\b", low):
+            category = "print"
+        out.append({"issn": issn, "category": category})
+    return out
+
+
 def evaluate_issn_consistency(submission: dict[str, Any]) -> dict[str, Any]:
     rule_id = "doaj.issn_consistency.v1"
     rule_hint = "issn_consistency"
@@ -599,7 +789,7 @@ def evaluate_issn_consistency(submission: dict[str, Any]) -> dict[str, Any]:
             + _get_policy_pages(submission, "peer_review_policy")
         )
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = (
             _get_policy_urls(submission, rule_hint)
             or _get_policy_urls(submission, "publisher_identity")
@@ -611,6 +801,7 @@ def evaluate_issn_consistency(submission: dict[str, Any]) -> dict[str, Any]:
     text = _text_blob(pages)
     evidence_urls = [page["url"] for page in pages]
     issns = _extract_issns(text)
+    mentions = _extract_issn_mentions(text)
 
     if not issns:
         return {
@@ -623,13 +814,34 @@ def evaluate_issn_consistency(submission: dict[str, Any]) -> dict[str, Any]:
 
     valid = [issn for issn in issns if _issn_check_digit_valid(issn)]
     invalid = [issn for issn in issns if issn not in valid]
+    electronic_issns = sorted({item["issn"] for item in mentions if item["category"] == "electronic"})
+    valid_electronic = [issn for issn in electronic_issns if issn in valid]
+    invalid_electronic = [issn for issn in electronic_issns if issn in invalid]
 
-    if valid and not invalid:
+    if valid_electronic and not invalid_electronic:
         return {
             "rule_id": rule_id,
             "result": "pass",
-            "confidence": 0.8,
-            "notes": f"Detected valid ISSN values on-site: {', '.join(valid[:4])}.",
+            "confidence": 0.86,
+            "notes": f"Detected valid electronic ISSN value(s): {', '.join(valid_electronic[:4])}.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if invalid_electronic and not valid_electronic:
+        return {
+            "rule_id": rule_id,
+            "result": "fail",
+            "confidence": 0.9,
+            "notes": f"Electronic ISSN value(s) were detected but invalid: {', '.join(invalid_electronic[:4])}.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if valid and not invalid and not valid_electronic:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.62,
+            "notes": f"Valid ISSN value(s) detected ({', '.join(valid[:4])}) but no explicit electronic ISSN marker was found.",
             "evidence_urls": evidence_urls,
         }
 
@@ -646,7 +858,7 @@ def evaluate_issn_consistency(submission: dict[str, Any]) -> dict[str, Any]:
         "rule_id": rule_id,
         "result": "need_human_review",
         "confidence": 0.53,
-        "notes": "Mixed valid and invalid ISSN values were detected; consistency needs manual confirmation.",
+        "notes": "Mixed ISSN evidence was detected (including electronic/print variants); consistency needs manual confirmation.",
         "evidence_urls": evidence_urls,
     }
 
@@ -656,7 +868,7 @@ def evaluate_aims_scope(submission: dict[str, Any]) -> dict[str, Any]:
     rule_hint = "aims_scope"
     pages = _get_policy_pages(submission, rule_hint)
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = _get_policy_urls(submission, rule_hint)
         return missing
 
@@ -686,6 +898,8 @@ def evaluate_aims_scope(submission: dict[str, Any]) -> dict[str, Any]:
     has_heading = _contains_any(text, heading_signals)
     scope_count = _count_any(text, scope_signals)
     has_negative = _contains_any(text, negative_signals)
+    has_aim_or_focus = _contains_any(text, [r"\baims?\b", r"\bfocus\b"])
+    has_scope_word = _contains_any(text, [r"\bscope\b"])
 
     if has_negative and not (has_heading or scope_count >= 2):
         return {
@@ -697,6 +911,14 @@ def evaluate_aims_scope(submission: dict[str, Any]) -> dict[str, Any]:
         }
 
     if has_heading and scope_count >= 1:
+        if has_scope_word and not has_aim_or_focus:
+            return {
+                "rule_id": rule_id,
+                "result": "need_human_review",
+                "confidence": 0.63,
+                "notes": "Scope information is present, but explicit aims/focus wording was not detected.",
+                "evidence_urls": evidence_urls,
+            }
         confidence = 0.82 if scope_count >= 2 else 0.74
         return {
             "rule_id": rule_id,
@@ -736,25 +958,34 @@ def evaluate_editorial_board(submission: dict[str, Any]) -> dict[str, Any]:
         role_people = []
 
     board_people: list[dict[str, Any]] = []
-    seen_names = set()
+    reviewer_people: list[dict[str, Any]] = []
+    seen_board = set()
+    seen_reviewer = set()
     for item in role_people:
         if not isinstance(item, dict):
             continue
         role = str(item.get("role", ""))
-        if role not in {"editor", "editorial_board_member"}:
-            continue
         name = str(item.get("name", "")).strip()
         if not name:
             continue
-        low = name.lower()
-        if low in seen_names:
+        key = name.lower()
+        if role in {"editor", "editorial_board_member"}:
+            if key in seen_board:
+                continue
+            seen_board.add(key)
+            board_people.append(item)
             continue
-        seen_names.add(low)
-        board_people.append(item)
+        if role == "reviewer":
+            if key in seen_reviewer:
+                continue
+            seen_reviewer.add(key)
+            reviewer_people.append(item)
 
     board_count = len(board_people)
+    reviewer_count = len(reviewer_people)
     has_editor = any(str(item.get("role", "")) == "editor" for item in board_people)
-    has_affiliation_field = any(str(item.get("affiliation", "")).strip() for item in board_people)
+    board_affiliations = [str(item.get("affiliation", "")).strip() for item in board_people if str(item.get("affiliation", "")).strip()]
+    has_affiliation_field = bool(board_affiliations)
     affiliation_signals = [
         r"\buniversity\b",
         r"\binstitute\b",
@@ -766,6 +997,16 @@ def evaluate_editorial_board(submission: dict[str, Any]) -> dict[str, Any]:
         r"\bcountry\b",
     ]
     has_affiliation_text = _contains_any(text, affiliation_signals)
+    publisher_signatures = _publisher_signatures(submission)
+    board_same, board_outside, board_unknown = _count_group_affiliation_composition(
+        board_people, publisher_signatures
+    )
+    reviewer_same, reviewer_outside, reviewer_unknown = _count_group_affiliation_composition(
+        reviewer_people, publisher_signatures
+    )
+    reviewer_urls = _get_policy_urls(submission, "reviewers")
+    reviewer_page_exists = bool(reviewer_urls)
+
     no_board_signals = [
         r"\bno\s+editorial\s+board\b",
         r"\beditorial\s+board\s+not\s+available\b",
@@ -781,25 +1022,6 @@ def evaluate_editorial_board(submission: dict[str, Any]) -> dict[str, Any]:
             "evidence_urls": evidence_urls,
         }
 
-    if board_count >= 3 and has_editor and (has_affiliation_field or has_affiliation_text):
-        confidence = 0.84 if (has_affiliation_field and has_affiliation_text) else 0.76
-        return {
-            "rule_id": rule_id,
-            "result": "pass",
-            "confidence": confidence,
-            "notes": "Editorial board members and editor roles are available with affiliation indicators.",
-            "evidence_urls": evidence_urls,
-        }
-
-    if board_count >= 2 and has_editor:
-        return {
-            "rule_id": rule_id,
-            "result": "need_human_review",
-            "confidence": 0.63,
-            "notes": "Editorial board names are present but affiliation evidence is weak.",
-            "evidence_urls": evidence_urls,
-        }
-
     if board_count == 0:
         return {
             "rule_id": rule_id,
@@ -809,12 +1031,78 @@ def evaluate_editorial_board(submission: dict[str, Any]) -> dict[str, Any]:
             "evidence_urls": evidence_urls,
         }
 
+    notes: list[str] = []
+    needs_human_review = False
+
+    if not has_editor:
+        needs_human_review = True
+        notes.append("No explicit editor role was detected.")
+    if board_count < 5:
+        needs_human_review = True
+        notes.append(f"Only {board_count} editorial board member(s) were extracted (target minimum: 5).")
+    if not (has_affiliation_field or has_affiliation_text):
+        needs_human_review = True
+        notes.append("Editorial board affiliation evidence is weak or missing.")
+    board_same_ratio = board_same / board_count if board_count else 0.0
+    board_outside_ratio = board_outside / board_count if board_count else 0.0
+    notes.append(
+        "Editorial board affiliation composition (informational only): "
+        f"{board_same}/{board_count} ({round(board_same_ratio * 100, 2)}%) same institution as publisher, "
+        f"{board_outside}/{board_count} ({round(board_outside_ratio * 100, 2)}%) outside, "
+        f"{board_unknown}/{board_count} unknown. No fixed composition threshold is applied to editorial board."
+    )
+
+    if reviewer_page_exists:
+        if reviewer_count < 10:
+            needs_human_review = True
+            notes.append(f"Only {reviewer_count} reviewer name(s) were extracted (target minimum: 10).")
+        else:
+            known_total = reviewer_same + reviewer_outside
+            same_ratio = reviewer_same / reviewer_count if reviewer_count else 0.0
+            outside_ratio = reviewer_outside / reviewer_count if reviewer_count else 0.0
+            notes.append(
+                "Reviewer affiliation composition (enforced): "
+                f"{reviewer_same}/{reviewer_count} ({round(same_ratio * 100, 2)}%) same institution, "
+                f"{reviewer_outside}/{reviewer_count} ({round(outside_ratio * 100, 2)}%) outside, "
+                f"{reviewer_unknown}/{reviewer_count} unknown."
+            )
+            if known_total < reviewer_count:
+                needs_human_review = True
+                notes.append(
+                    f"Reviewer affiliation classification is incomplete ({known_total}/{reviewer_count} identified as inside/outside publisher institution)."
+                )
+            else:
+                if same_ratio > 0.40 or outside_ratio < 0.60:
+                    return {
+                        "rule_id": rule_id,
+                        "result": "fail",
+                        "confidence": 0.83,
+                        "notes": (
+                            f"Reviewer affiliation composition is outside target range: "
+                            f"{round(same_ratio * 100, 2)}% from publisher institution and "
+                            f"{round(outside_ratio * 100, 2)}% outside (required: <=40% and >=60%)."
+                        ),
+                        "evidence_urls": evidence_urls + reviewer_urls,
+                    }
+                notes.append("Reviewer composition meets target range (<=40% same institution, >=60% outside).")
+    else:
+        notes.append("Reviewer page URL was not provided; reviewer composition check was skipped.")
+
+    if needs_human_review:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.61,
+            "notes": " ".join(notes),
+            "evidence_urls": evidence_urls + reviewer_urls,
+        }
+
     return {
         "rule_id": rule_id,
-        "result": "need_human_review",
-        "confidence": 0.56,
-        "notes": "Editorial board information is incomplete or ambiguous.",
-        "evidence_urls": evidence_urls,
+        "result": "pass",
+        "confidence": 0.8,
+        "notes": "Editorial board minimum criteria are met. " + " ".join(notes),
+        "evidence_urls": evidence_urls + reviewer_urls,
     }
 
 
@@ -823,7 +1111,7 @@ def evaluate_instructions_for_authors(submission: dict[str, Any]) -> dict[str, A
     rule_hint = "instructions_for_authors"
     pages = _get_policy_pages(submission, rule_hint)
     if not pages:
-        missing = _missing_policy_result(rule_id, rule_hint)
+        missing = _missing_policy_result(rule_id, rule_hint, submission)
         missing["evidence_urls"] = _get_policy_urls(submission, rule_hint)
         return missing
 
@@ -888,5 +1176,205 @@ def evaluate_instructions_for_authors(submission: dict[str, Any]) -> dict[str, A
         "result": "need_human_review",
         "confidence": 0.55,
         "notes": "Author instruction wording is not explicit enough for automatic decision.",
+        "evidence_urls": evidence_urls,
+    }
+
+
+def _optional_not_provided(rule_id: str, rule_hint: str) -> dict[str, Any]:
+    return {
+        "rule_id": rule_id,
+        "result": "not_provided",
+        "confidence": 1.0,
+        "notes": f"Optional URL for `{rule_hint}` was not provided.",
+        "evidence_urls": [],
+    }
+
+
+def evaluate_plagiarism_policy(submission: dict[str, Any]) -> dict[str, Any]:
+    rule_id = "doaj.plagiarism_policy.v1"
+    rule_hint = "plagiarism_policy"
+    pages = _get_policy_pages(submission, rule_hint)
+    if not pages:
+        fallback_pages = _get_policy_pages(submission, "instructions_for_authors")
+        if fallback_pages and _contains_any(_text_blob(fallback_pages), [r"\bplagiarism\b", r"\bsimilarity\b"]):
+            pages = fallback_pages
+    if not pages:
+        out = _optional_not_provided(rule_id, rule_hint)
+        out["evidence_urls"] = _get_policy_urls(submission, rule_hint)
+        return out
+
+    text = _text_blob(pages)
+    evidence_urls = [page["url"] for page in pages]
+    has_policy = _contains_any(text, [r"\bplagiarism\b", r"\bsimilarity index\b", r"\boriginality\b"])
+    tools = [
+        name
+        for name, pattern in {
+            "Turnitin": r"\bturnitin\b",
+            "iThenticate": r"\bithenticate\b",
+            "Crossref Similarity Check": r"\bcrossref similarity check\b",
+            "PlagScan": r"\bplagscan\b",
+        }.items()
+        if re.search(pattern, text, flags=re.IGNORECASE)
+    ]
+
+    threshold_match = re.search(r"(maximum|max|below|under)\s+(\d{1,2})\s*%[^.\n]{0,40}(similarity|plagiarism)", text, flags=re.IGNORECASE)
+    if threshold_match is None:
+        threshold_match = re.search(r"(similarity|plagiarism)[^.\n]{0,40}(\d{1,2})\s*%", text, flags=re.IGNORECASE)
+    threshold = threshold_match.group(2) if threshold_match else ""
+
+    if has_policy and tools and threshold:
+        return {
+            "rule_id": rule_id,
+            "result": "pass",
+            "confidence": 0.8,
+            "notes": f"Plagiarism policy detected with tool(s): {', '.join(tools)} and similarity threshold: {threshold}%.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if has_policy:
+        detail = []
+        if not tools:
+            detail.append("tool name not found")
+        if not threshold:
+            detail.append("similarity threshold not found")
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.62,
+            "notes": "Plagiarism policy text exists but " + ", ".join(detail) + ".",
+            "evidence_urls": evidence_urls,
+        }
+
+    return {
+        "rule_id": rule_id,
+        "result": "need_human_review",
+        "confidence": 0.5,
+        "notes": "Plagiarism policy URL exists but no clear policy wording was detected.",
+        "evidence_urls": evidence_urls,
+    }
+
+
+def evaluate_archiving_policy(submission: dict[str, Any]) -> dict[str, Any]:
+    rule_id = "doaj.archiving_policy.v1"
+    rule_hint = "archiving_policy"
+    pages = _get_policy_pages(submission, rule_hint)
+    if not pages:
+        out = _optional_not_provided(rule_id, rule_hint)
+        out["evidence_urls"] = _get_policy_urls(submission, rule_hint)
+        return out
+
+    text = _text_blob(pages)
+    evidence_urls = [page["url"] for page in pages]
+    services = [
+        name
+        for name, pattern in {
+            "CLOCKSS": r"\bclockss\b",
+            "LOCKSS": r"\blockss\b",
+            "Portico": r"\bportico\b",
+            "PKP PN": r"\bpkp\s*pn\b",
+            "Internet Archive": r"\binternet archive\b",
+            "PubMed Central": r"\bpubmed central\b|\bpmc\b",
+            "National Library": r"\bnational library\b",
+            "CINES": r"\bcines\b",
+        }.items()
+        if re.search(pattern, text, flags=re.IGNORECASE)
+    ]
+    has_no_archiving = _contains_any(text, [r"\bnot archived\b", r"\bno archiving\b", r"\bno long[- ]term preservation\b"])
+
+    if services:
+        return {
+            "rule_id": rule_id,
+            "result": "pass",
+            "confidence": 0.79,
+            "notes": f"Archiving policy detected with service(s): {', '.join(services)}.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if has_no_archiving:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.58,
+            "notes": "Archiving policy indicates content is not archived with a long-term preservation service.",
+            "evidence_urls": evidence_urls,
+        }
+
+    return {
+        "rule_id": rule_id,
+        "result": "need_human_review",
+        "confidence": 0.54,
+        "notes": "Archiving URL exists but no recognized preservation service was detected.",
+        "evidence_urls": evidence_urls,
+    }
+
+
+def evaluate_repository_policy(submission: dict[str, Any]) -> dict[str, Any]:
+    rule_id = "doaj.repository_policy.v1"
+    rule_hint = "repository_policy"
+    pages = _get_policy_pages(submission, rule_hint)
+    if not pages:
+        out = _optional_not_provided(rule_id, rule_hint)
+        out["evidence_urls"] = _get_policy_urls(submission, rule_hint)
+        return out
+
+    text = _text_blob(pages)
+    evidence_urls = [page["url"] for page in pages]
+    has_no_policy = _contains_any(text, [r"\bno repository policy\b", r"\bjournal has no repository policy\b"])
+    version_signals = [
+        r"\bsubmitted version\b",
+        r"\baccepted version\b",
+        r"\bauthor accepted manuscript\b",
+        r"\bpostprint\b",
+        r"\bpreprint\b",
+        r"\bpublished version\b",
+        r"\bversion of record\b",
+    ]
+    repository_services = [
+        name
+        for name, pattern in {
+            "Sherpa/Romeo": r"\bsherpa/?romeo\b",
+            "Dulcinea": r"\bdulcinea\b",
+            "Diadorim": r"\bdiadorim\b",
+            "Mir@bel": r"\bmir@?bel\b",
+            "Institutional repository": r"\binstitutional repository\b",
+        }.items()
+        if re.search(pattern, text, flags=re.IGNORECASE)
+    ]
+    has_version_statement = _contains_any(text, version_signals)
+    has_license = _contains_any(text, list(LICENSE_PATTERNS.values()) + [r"\blicen[sc]e\b"])
+
+    if has_no_policy:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.6,
+            "notes": "Repository policy explicitly states no policy is available.",
+            "evidence_urls": evidence_urls,
+        }
+
+    if has_version_statement and (has_license or repository_services):
+        extra = f" Registry/service mention: {', '.join(repository_services)}." if repository_services else ""
+        return {
+            "rule_id": rule_id,
+            "result": "pass",
+            "confidence": 0.76,
+            "notes": "Repository policy covers version-specific deposit conditions." + extra,
+            "evidence_urls": evidence_urls,
+        }
+
+    if has_version_statement:
+        return {
+            "rule_id": rule_id,
+            "result": "need_human_review",
+            "confidence": 0.6,
+            "notes": "Repository policy mentions article versions but license/deposit conditions are unclear.",
+            "evidence_urls": evidence_urls,
+        }
+
+    return {
+        "rule_id": rule_id,
+        "result": "need_human_review",
+        "confidence": 0.52,
+        "notes": "Repository policy URL exists but no clear preprint/postprint/version-of-record policy was detected.",
         "evidence_urls": evidence_urls,
     }

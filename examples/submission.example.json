@@ -7,9 +7,7 @@
     "editorial_board": [
       "https://example-journal.org/editorial-board"
     ],
-    "reviewers": [
-      "https://example-journal.org/reviewers"
-    ],
+    "reviewers": [],
     "latest_content": [
       "https://example-journal.org/volume-12-issue-2",
       "https://example-journal.org/volume-12-issue-1"
@@ -43,28 +41,41 @@
     ],
     "instructions_for_authors": [
       "https://example-journal.org/instructions"
-    ]
+    ],
+    "plagiarism_policy": [],
+    "archiving_policy": [],
+    "repository_policy": []
   },
   "role_people": [
     {
       "name": "Dr. Jane Smith",
       "role": "editor",
-      "source_url": "https://example-journal.org/editorial-board"
+      "source_url": "https://example-journal.org/editorial-board",
+      "affiliation": "Example University"
     },
     {
       "name": "Asep Rahman",
       "role": "editorial_board_member",
-      "source_url": "https://example-journal.org/editorial-board"
+      "source_url": "https://example-journal.org/editorial-board",
+      "affiliation": "University A"
     },
     {
       "name": "Dwi Prasetyo",
       "role": "editorial_board_member",
-      "source_url": "https://example-journal.org/editorial-board"
+      "source_url": "https://example-journal.org/editorial-board",
+      "affiliation": "Institute B"
     },
     {
-      "name": "Lina Putri",
-      "role": "reviewer",
-      "source_url": "https://example-journal.org/reviewers"
+      "name": "Rina Lestari",
+      "role": "editorial_board_member",
+      "source_url": "https://example-journal.org/editorial-board",
+      "affiliation": "Institute D"
+    },
+    {
+      "name": "Bayu Nugroho",
+      "role": "editorial_board_member",
+      "source_url": "https://example-journal.org/editorial-board",
+      "affiliation": "Institute E"
     }
   ],
   "units": [
@@ -282,6 +293,24 @@
       "url": "https://example-journal.org/editorial-board",
       "title": "Editorial Board",
       "text": "Editor in Chief: Dr. Jane Smith, Example University. Editorial Board: Asep Rahman, University A; Dwi Prasetyo, Institute B; Lina Putri, University C."
+    },
+    {
+      "rule_hint": "plagiarism_policy",
+      "url": "https://example-journal.org/plagiarism",
+      "title": "Plagiarism Policy",
+      "text": "The journal screens submissions for plagiarism using Turnitin with a maximum similarity threshold of 20%."
+    },
+    {
+      "rule_hint": "archiving_policy",
+      "url": "https://example-journal.org/archiving",
+      "title": "Archiving Policy",
+      "text": "Journal content is archived in PKP PN and LOCKSS for long-term preservation."
+    },
+    {
+      "rule_hint": "repository_policy",
+      "url": "https://example-journal.org/repository-policy",
+      "title": "Repository Policy",
+      "text": "Authors may deposit submitted version, accepted version, and version of record in institutional repositories under CC BY license."
     }
   ]
 }

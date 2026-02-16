@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -17,37 +18,68 @@ from uuid import uuid4
 
 from .intake import build_structured_submission_from_raw
 from .reporting import render_endogeny_markdown
-from .review import render_review_summary_markdown, run_review
+from .review import render_review_summary_markdown, render_review_summary_text, run_review
 
 
 URL_FIELDS = [
+    "open_access_statement",
+    "issn_consistency",
+    "publisher_identity",
+    "license_terms",
+    "copyright_author_rights",
+    "peer_review_policy",
+    "plagiarism_policy",
+    "aims_scope",
     "editorial_board",
     "reviewers",
     "latest_content",
-    "archives",
-    "open_access_statement",
-    "aims_scope",
     "instructions_for_authors",
-    "peer_review_policy",
+    "publication_fees_disclosure",
+    "archiving_policy",
+    "repository_policy",
+    "archives",
+]
+POLICY_HINT_KEYS = [
+    "open_access_statement",
+    "issn_consistency",
+    "publisher_identity",
     "license_terms",
     "copyright_author_rights",
+    "peer_review_policy",
+    "plagiarism_policy",
+    "aims_scope",
     "publication_fees_disclosure",
-    "publisher_identity",
-    "issn_consistency",
+    "archiving_policy",
+    "repository_policy",
+    "instructions_for_authors",
 ]
 
 RESULT_RULE_COLUMNS = [
     "doaj.open_access_statement.v1",
+    "doaj.issn_consistency.v1",
+    "doaj.publisher_identity.v1",
+    "doaj.license_terms.v1",
+    "doaj.copyright_author_rights.v1",
+    "doaj.peer_review_policy.v1",
     "doaj.aims_scope.v1",
     "doaj.editorial_board.v1",
     "doaj.instructions_for_authors.v1",
-    "doaj.peer_review_policy.v1",
-    "doaj.license_terms.v1",
-    "doaj.copyright_author_rights.v1",
     "doaj.publication_fees_disclosure.v1",
-    "doaj.publisher_identity.v1",
-    "doaj.issn_consistency.v1",
     "doaj.endogeny.v1",
+]
+
+REQUIRED_URL_FIELDS = [
+    "open_access_statement",
+    "issn_consistency",
+    "publisher_identity",
+    "license_terms",
+    "copyright_author_rights",
+    "peer_review_policy",
+    "aims_scope",
+    "editorial_board",
+    "latest_content",
+    "instructions_for_authors",
+    "publication_fees_disclosure",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +103,84 @@ def split_urls(text: str) -> list[str]:
     return out
 
 
+def _extract_text_from_pdf_bytes(payload: bytes) -> str:
+    for module_name in ("pypdf", "PyPDF2"):
+        try:
+            module = __import__(module_name, fromlist=["PdfReader"])
+            reader = module.PdfReader(io.BytesIO(payload))
+            chunks: list[str] = []
+            for page in reader.pages[:40]:
+                try:
+                    text = page.extract_text() or ""
+                except Exception:
+                    text = ""
+                if text.strip():
+                    chunks.append(text.strip())
+            merged = "\n\n".join(chunks).strip()
+            if merged:
+                return merged
+        except Exception:
+            continue
+    return ""
+
+
+def _normalize_manual_policy_pages(payload: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
+    raw_items = payload.get("manual_policy_pages", [])
+    if not isinstance(raw_items, list):
+        return [], []
+
+    pages: list[dict[str, str]] = []
+    warnings: list[str] = []
+    for index, item in enumerate(raw_items, start=1):
+        if not isinstance(item, dict):
+            continue
+        hint = str(item.get("rule_hint", "")).strip()
+        if hint not in POLICY_HINT_KEYS:
+            warnings.append(f"Ignored manual fallback entry with unknown rule_hint: `{hint}`.")
+            continue
+
+        title = str(item.get("title", "")).strip() or f"Manual fallback ({hint})"
+        source_label = str(item.get("source_label", "")).strip() or f"manual://{hint}/{index}"
+        if "://" not in source_label:
+            source_label = f"manual://{hint}/{index}"
+
+        text_value = str(item.get("text", "")).strip()
+        if text_value:
+            pages.append(
+                {
+                    "rule_hint": hint,
+                    "url": source_label,
+                    "title": title[:180],
+                    "text": text_value[:120000],
+                }
+            )
+
+        pdf_base64 = str(item.get("pdf_base64", "")).strip()
+        if pdf_base64:
+            file_name = str(item.get("file_name", "")).strip() or f"{hint}.pdf"
+            try:
+                pdf_bytes = base64.b64decode(pdf_base64, validate=True)
+            except Exception:
+                warnings.append(f"Manual PDF `{file_name}` for `{hint}` could not be decoded.")
+                continue
+            extracted = _extract_text_from_pdf_bytes(pdf_bytes)
+            if not extracted:
+                warnings.append(
+                    f"Manual PDF `{file_name}` for `{hint}` was uploaded, but text extraction failed. Paste text manually for this rule."
+                )
+                continue
+            pages.append(
+                {
+                    "rule_hint": hint,
+                    "url": f"{source_label}/pdf",
+                    "title": f"Manual PDF: {file_name}"[:180],
+                    "text": extracted[:120000],
+                }
+            )
+
+    return pages, warnings
+
+
 def _now_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
@@ -88,13 +198,19 @@ def build_raw_submission_from_form(payload: dict[str, Any]) -> dict[str, Any]:
     source_urls: dict[str, list[str]] = {}
     for field in URL_FIELDS:
         source_urls[field] = split_urls(str(payload.get(field, "")))
+    manual_policy_pages, manual_warnings = _normalize_manual_policy_pages(payload)
 
-    return {
+    raw = {
         "submission_id": submission_id,
         "journal_homepage_url": homepage,
         "publication_model": publication_model,
         "source_urls": source_urls,
     }
+    if manual_policy_pages:
+        raw["manual_policy_pages"] = manual_policy_pages
+    if manual_warnings:
+        raw["manual_input_warnings"] = manual_warnings
+    return raw
 
 
 def validate_raw_submission(raw: dict[str, Any]) -> list[str]:
@@ -105,10 +221,9 @@ def validate_raw_submission(raw: dict[str, Any]) -> list[str]:
     if not isinstance(source_urls, dict):
         errors.append("source_urls must be an object")
         return errors
-    if not source_urls.get("editorial_board"):
-        errors.append("At least one editorial_board URL is required")
-    if not source_urls.get("latest_content"):
-        errors.append("At least one latest_content URL is required")
+    for field in REQUIRED_URL_FIELDS:
+        if not source_urls.get(field):
+            errors.append(f"At least one `{field}` URL is required")
     return errors
 
 
@@ -157,11 +272,13 @@ class SimulationApp:
             js_mode = "auto"
 
         raw = build_raw_submission_from_form(form_payload)
+        warnings = [str(item) for item in raw.get("manual_input_warnings", []) if str(item).strip()]
         errors = validate_raw_submission(raw)
         if errors:
             return {
                 "ok": False,
                 "errors": errors,
+                "warnings": warnings,
             }
 
         run_id = f"{_now_stamp()}-{uuid4().hex[:8]}"
@@ -172,6 +289,7 @@ class SimulationApp:
         structured_path = run_dir / "submission.structured.json"
         summary_json_path = run_dir / "review-summary.json"
         summary_md_path = run_dir / "review-summary.md"
+        summary_txt_path = run_dir / "review-summary.txt"
         endogeny_json_path = run_dir / "endogeny-result.json"
         endogeny_md_path = run_dir / "endogeny-report.md"
         error_path = run_dir / "error.txt"
@@ -184,6 +302,7 @@ class SimulationApp:
             summary, endogeny = run_review(submission=structured, ruleset=self.ruleset)
             _write_json(summary_json_path, summary)
             _write_text(summary_md_path, render_review_summary_markdown(summary))
+            _write_text(summary_txt_path, render_review_summary_text(summary))
             _write_json(endogeny_json_path, endogeny)
             _write_text(endogeny_md_path, render_endogeny_markdown(endogeny))
 
@@ -192,14 +311,18 @@ class SimulationApp:
                 "structured": f"/runs/{run_id}/submission.structured.json",
                 "summary_json": f"/runs/{run_id}/review-summary.json",
                 "summary_md": f"/runs/{run_id}/review-summary.md",
+                "summary_txt": f"/runs/{run_id}/review-summary.txt",
                 "endogeny_json": f"/runs/{run_id}/endogeny-result.json",
                 "endogeny_md": f"/runs/{run_id}/endogeny-report.md",
             }
             return {
                 "ok": True,
                 "run_id": run_id,
+                "submission_id": summary.get("submission_id", raw.get("submission_id", "")),
                 "overall_result": summary.get("overall_result", "need_human_review"),
                 "checks": summary.get("checks", []),
+                "supplementary_checks": summary.get("supplementary_checks", []),
+                "warnings": warnings,
                 "artifacts": artifacts,
             }
         except Exception:
@@ -209,6 +332,7 @@ class SimulationApp:
                 "ok": False,
                 "run_id": run_id,
                 "errors": ["review run failed"],
+                "warnings": warnings,
                 "artifacts": {
                     "raw": f"/runs/{run_id}/submission.raw.json",
                     "error": f"/runs/{run_id}/error.txt",
@@ -308,26 +432,30 @@ def _html_page() -> str:
     input, select, textarea, button { width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
     textarea { min-height: 74px; resize: vertical; }
     .urls { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 10px; }
+    .manual { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 10px; }
     button { background:var(--accent); color:white; border:none; cursor:pointer; font-weight:600; }
     button.secondary { background:#334155; }
-    .actions { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:12px; }
+    .actions { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:10px; margin-top:12px; }
+    .result-actions { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin:8px 0 10px; }
+    .result-actions button[disabled] { opacity:0.55; cursor:not-allowed; }
     table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
     th, td { border-bottom:1px solid var(--line); text-align:left; padding:6px; vertical-align:top; }
     .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
     .pass { background:#e8f7ef; color:var(--ok); }
     .need_human_review { background:#fff7df; color:var(--warn); }
     .fail { background:#fdecec; color:var(--bad); }
+    .not_provided { background:#eef2f7; color:#475569; }
     code { background:#f1f5f9; padding:1px 6px; border-radius:6px; }
     .run-list a, .artifacts a { color:#0b5fff; text-decoration:none; }
     .run-list li { margin-bottom:6px; }
-    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } .urls { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } .urls { grid-template-columns: 1fr; } .manual { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>DOAJ Reviewer Simulation</h1>
-      <div class="muted">Form nyata untuk bug testing: isi URL, submit, jalankan reviewer, simpan artifact per run.</div>
+      <div class="muted">Use this realistic form to test URL crawling, rule checks, and generated artifacts per run.</div>
       <div class="grid">
         <div>
           <label>Submission ID (optional)</label>
@@ -354,28 +482,53 @@ def _html_page() -> str:
         </div>
       </div>
       <div class="urls">
-        <div><label>editorial_board (1 URL per baris)</label><textarea id="editorial_board"></textarea></div>
-        <div><label>reviewers</label><textarea id="reviewers"></textarea></div>
-        <div><label>latest_content</label><textarea id="latest_content"></textarea></div>
-        <div><label>archives</label><textarea id="archives"></textarea></div>
-        <div><label>open_access_statement</label><textarea id="open_access_statement"></textarea></div>
-        <div><label>aims_scope</label><textarea id="aims_scope"></textarea></div>
-        <div><label>instructions_for_authors</label><textarea id="instructions_for_authors"></textarea></div>
-        <div><label>peer_review_policy</label><textarea id="peer_review_policy"></textarea></div>
-        <div><label>license_terms</label><textarea id="license_terms"></textarea></div>
-        <div><label>copyright_author_rights</label><textarea id="copyright_author_rights"></textarea></div>
-        <div><label>publication_fees_disclosure</label><textarea id="publication_fees_disclosure"></textarea></div>
-        <div><label>publisher_identity</label><textarea id="publisher_identity"></textarea></div>
-        <div><label>issn_consistency</label><textarea id="issn_consistency"></textarea></div>
+        <div><label>Open Access statement URL(s) (required)</label><textarea id="open_access_statement"></textarea></div>
+        <div><label>ISSN evidence URL(s) (required, prioritize electronic ISSN)</label><textarea id="issn_consistency"></textarea></div>
+        <div><label>Publisher information URL(s) (required)</label><textarea id="publisher_identity"></textarea></div>
+        <div><label>License terms URL(s) (required)</label><textarea id="license_terms"></textarea></div>
+        <div><label>Copyright policy URL(s) (required)</label><textarea id="copyright_author_rights"></textarea></div>
+        <div><label>Peer review policy URL(s) (required)</label><textarea id="peer_review_policy"></textarea></div>
+        <div><label>Plagiarism policy URL(s) (optional)</label><textarea id="plagiarism_policy"></textarea></div>
+        <div><label>Aims / Focus and Scope URL(s) (required)</label><textarea id="aims_scope"></textarea></div>
+        <div><label>Editorial board URL(s) (required)</label><textarea id="editorial_board"></textarea></div>
+        <div><label>Reviewer list URL(s) (optional)</label><textarea id="reviewers"></textarea></div>
+        <div><label>Latest issue URL(s) for endogeny (required, latest 2 issues)</label><textarea id="latest_content"></textarea></div>
+        <div><label>Instructions for authors URL(s) (required)</label><textarea id="instructions_for_authors"></textarea></div>
+        <div><label>Publication fee/APC URL(s) (required)</label><textarea id="publication_fees_disclosure"></textarea></div>
+        <div><label>Archiving policy URL(s) (optional)</label><textarea id="archiving_policy"></textarea></div>
+        <div><label>Repository policy URL(s) (optional)</label><textarea id="repository_policy"></textarea></div>
+        <div><label>Archive URL(s) (optional support for continuous model)</label><textarea id="archives"></textarea></div>
+      </div>
+      <h3 style="margin:14px 0 6px;font-size:15px;">Manual fallback (optional, for WAF/Cloudflare blocks)</h3>
+      <div class="muted" style="margin-bottom:6px;">If a policy URL is blocked, paste text and/or upload one PDF for that policy.</div>
+      <div class="manual">
+        <div><label>Open Access manual text</label><textarea id="manual_text_open_access_statement"></textarea><label>Open Access PDF (optional)</label><input id="manual_pdf_open_access_statement" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>ISSN manual text</label><textarea id="manual_text_issn_consistency"></textarea><label>ISSN PDF (optional)</label><input id="manual_pdf_issn_consistency" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Publisher identity manual text</label><textarea id="manual_text_publisher_identity"></textarea><label>Publisher identity PDF (optional)</label><input id="manual_pdf_publisher_identity" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>License terms manual text</label><textarea id="manual_text_license_terms"></textarea><label>License terms PDF (optional)</label><input id="manual_pdf_license_terms" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Copyright policy manual text</label><textarea id="manual_text_copyright_author_rights"></textarea><label>Copyright policy PDF (optional)</label><input id="manual_pdf_copyright_author_rights" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Peer review policy manual text</label><textarea id="manual_text_peer_review_policy"></textarea><label>Peer review policy PDF (optional)</label><input id="manual_pdf_peer_review_policy" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Plagiarism policy manual text</label><textarea id="manual_text_plagiarism_policy"></textarea><label>Plagiarism policy PDF (optional)</label><input id="manual_pdf_plagiarism_policy" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Aims/scope manual text</label><textarea id="manual_text_aims_scope"></textarea><label>Aims/scope PDF (optional)</label><input id="manual_pdf_aims_scope" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Publication fee/APC manual text</label><textarea id="manual_text_publication_fees_disclosure"></textarea><label>Publication fee/APC PDF (optional)</label><input id="manual_pdf_publication_fees_disclosure" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Archiving policy manual text</label><textarea id="manual_text_archiving_policy"></textarea><label>Archiving policy PDF (optional)</label><input id="manual_pdf_archiving_policy" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Repository policy manual text</label><textarea id="manual_text_repository_policy"></textarea><label>Repository policy PDF (optional)</label><input id="manual_pdf_repository_policy" type="file" accept=".pdf,application/pdf"></div>
+        <div><label>Instructions for authors manual text</label><textarea id="manual_text_instructions_for_authors"></textarea><label>Instructions PDF (optional)</label><input id="manual_pdf_instructions_for_authors" type="file" accept=".pdf,application/pdf"></div>
       </div>
       <div class="actions">
-        <button id="fillSample">Fill sample</button>
+        <button id="fillSample" class="secondary">Fill sample</button>
+        <button id="resetBtn" class="secondary">Reset form</button>
         <button id="submitBtn">Run simulation</button>
       </div>
     </div>
     <div class="card">
       <h2 style="margin:0 0 8px;font-size:18px;">Result</h2>
-      <div id="status" class="muted">Belum ada run.</div>
+      <div id="status" class="muted">No run yet.</div>
+      <div id="warnings" class="muted"></div>
+      <div class="result-actions">
+        <button id="printPdfBtn" class="secondary" disabled>Print to PDF</button>
+        <button id="downloadTxtBtn" class="secondary" disabled>Download text</button>
+      </div>
       <div id="artifacts" class="artifacts"></div>
       <div id="checks"></div>
       <h3 style="margin-top:14px;">Recent runs</h3>
@@ -386,56 +539,275 @@ def _html_page() -> str:
 <script>
 const fields = [
   "submission_id","journal_homepage_url","publication_model","js_mode",
-  "editorial_board","reviewers","latest_content","archives",
-  "open_access_statement","aims_scope","instructions_for_authors",
-  "peer_review_policy","license_terms","copyright_author_rights",
-  "publication_fees_disclosure","publisher_identity","issn_consistency"
+  "open_access_statement","issn_consistency","publisher_identity",
+  "license_terms","copyright_author_rights","peer_review_policy",
+  "plagiarism_policy","aims_scope","editorial_board","reviewers",
+  "latest_content","instructions_for_authors","publication_fees_disclosure",
+  "archiving_policy","repository_policy","archives"
+];
+const manualPolicyHints = [
+  "open_access_statement","issn_consistency","publisher_identity","license_terms",
+  "copyright_author_rights","peer_review_policy","plagiarism_policy","aims_scope",
+  "publication_fees_disclosure","archiving_policy","repository_policy","instructions_for_authors"
 ];
 const sample = {
   journal_homepage_url: "https://example-journal.org",
   publication_model: "issue_based",
   js_mode: "auto",
+  open_access_statement: "https://example-journal.org/open-access",
+  issn_consistency: "https://example-journal.org/about",
+  publisher_identity: "https://example-journal.org/publisher",
+  license_terms: "https://example-journal.org/licensing",
+  copyright_author_rights: "https://example-journal.org/copyright",
+  peer_review_policy: "https://example-journal.org/peer-review",
+  plagiarism_policy: "https://example-journal.org/plagiarism",
+  aims_scope: "https://example-journal.org/aims-and-scope",
   editorial_board: "https://example-journal.org/editorial-board",
   reviewers: "https://example-journal.org/reviewers",
   latest_content: "https://example-journal.org/volume-12-issue-2\\nhttps://example-journal.org/volume-12-issue-1",
-  archives: "https://example-journal.org/archive",
-  open_access_statement: "https://example-journal.org/open-access",
-  aims_scope: "https://example-journal.org/aims-and-scope",
   instructions_for_authors: "https://example-journal.org/instructions",
-  peer_review_policy: "https://example-journal.org/peer-review",
-  license_terms: "https://example-journal.org/licensing",
-  copyright_author_rights: "https://example-journal.org/copyright",
   publication_fees_disclosure: "https://example-journal.org/apc",
-  publisher_identity: "https://example-journal.org/publisher",
-  issn_consistency: "https://example-journal.org/about"
+  archiving_policy: "https://example-journal.org/archiving",
+  repository_policy: "https://example-journal.org/repository-policy",
+  archives: "https://example-journal.org/archive"
 };
+let latestResult = null;
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function setResultActions(enabled) {
+  document.getElementById("printPdfBtn").disabled = !enabled;
+  document.getElementById("downloadTxtBtn").disabled = !enabled;
+}
 
 function badge(result) { return '<span class="badge '+result+'">'+result+'</span>'; }
 
-function payloadFromForm() {
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const out = String(reader.result || "");
+      const marker = "base64,";
+      const idx = out.indexOf(marker);
+      if (idx >= 0) resolve(out.slice(idx + marker.length));
+      else resolve(out);
+    };
+    reader.onerror = () => reject(reader.error || new Error("file read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function payloadFromForm() {
   const body = {};
   for (const id of fields) body[id] = document.getElementById(id).value || "";
+  const manual_policy_pages = [];
+  for (const hint of manualPolicyHints) {
+    const textValue = (document.getElementById("manual_text_" + hint).value || "").trim();
+    if (textValue) {
+      manual_policy_pages.push({
+        rule_hint: hint,
+        title: "Manual fallback text",
+        source_label: "manual://" + hint + "/text",
+        text: textValue
+      });
+    }
+    const fileInput = document.getElementById("manual_pdf_" + hint);
+    const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+    if (file) {
+      try {
+        const pdfBase64 = await readFileAsBase64(file);
+        manual_policy_pages.push({
+          rule_hint: hint,
+          title: "Manual PDF: " + file.name,
+          source_label: "manual://" + hint + "/pdf",
+          file_name: file.name,
+          pdf_base64: pdfBase64
+        });
+      } catch (_) {
+        // Server-side warnings still handle non-readable files.
+      }
+    }
+  }
+  if (manual_policy_pages.length) body.manual_policy_pages = manual_policy_pages;
   return body;
 }
 
 function setStatus(text) { document.getElementById("status").textContent = text; }
 
+function resetForm() {
+  for (const id of fields) {
+    if (id === "publication_model") {
+      document.getElementById(id).value = "issue_based";
+      continue;
+    }
+    if (id === "js_mode") {
+      document.getElementById(id).value = "auto";
+      continue;
+    }
+    document.getElementById(id).value = "";
+  }
+  document.getElementById("artifacts").innerHTML = "";
+  document.getElementById("checks").innerHTML = "";
+  document.getElementById("warnings").innerHTML = "";
+  for (const hint of manualPolicyHints) {
+    const textEl = document.getElementById("manual_text_" + hint);
+    const fileEl = document.getElementById("manual_pdf_" + hint);
+    if (textEl) textEl.value = "";
+    if (fileEl) fileEl.value = "";
+  }
+  setStatus("Form reset. Ready for a new simulation.");
+  document.getElementById("submission_id").focus();
+  latestResult = null;
+  setResultActions(false);
+}
+
+function buildPlainTextResult(data) {
+  const lines = [];
+  lines.push("DOAJ Reviewer Simulation Result");
+  lines.push("=============================");
+  lines.push("Run ID        : " + (data.run_id || ""));
+  lines.push("Submission ID : " + (data.submission_id || ""));
+  lines.push("Overall       : " + (data.overall_result || ""));
+  lines.push("");
+  lines.push("Must Checks");
+  lines.push("-----------");
+  const checks = data.checks || [];
+  checks.forEach((item, idx) => {
+    lines.push((idx + 1) + ". Rule ID    : " + (item.rule_id || ""));
+    lines.push("   Result     : " + (item.result || ""));
+    lines.push("   Confidence : " + (item.confidence ?? ""));
+    lines.push("   Notes      : " + (item.notes || ""));
+    lines.push("");
+  });
+  const supplementary = data.supplementary_checks || [];
+  if (supplementary.length) {
+    lines.push("Supplementary Checks (Non-must)");
+    lines.push("-------------------------------");
+    supplementary.forEach((item, idx) => {
+      lines.push((idx + 1) + ". Rule ID    : " + (item.rule_id || ""));
+      lines.push("   Result     : " + (item.result || ""));
+      lines.push("   Confidence : " + (item.confidence ?? ""));
+      lines.push("   Notes      : " + (item.notes || ""));
+      lines.push("");
+    });
+  }
+  return lines.join("\\n").trim() + "\\n";
+}
+
+function buildPrintableHtml(data) {
+  const mustRows = (data.checks || []).map(item =>
+    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(item.confidence ?? "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
+  ).join("");
+  const suppRows = (data.supplementary_checks || []).map(item =>
+    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(item.confidence ?? "")}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
+  ).join("");
+  const warnings = (data.warnings || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DOAJ Simulation Result - ${escapeHtml(data.submission_id || data.run_id || "")}</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    body { font-family: "IBM Plex Sans", "Segoe UI", sans-serif; color: #1f2937; }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    h2 { margin: 14px 0 8px; font-size: 16px; }
+    .meta { margin-bottom: 8px; font-size: 13px; }
+    .meta div { margin: 2px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #d7dde8; padding: 6px; vertical-align: top; text-align: left; }
+    th { background: #eef3fb; }
+    ul { margin: 6px 0 0 18px; padding: 0; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>DOAJ Reviewer Simulation Result</h1>
+  <div class="meta">
+    <div><strong>Run ID:</strong> ${escapeHtml(data.run_id || "")}</div>
+    <div><strong>Submission ID:</strong> ${escapeHtml(data.submission_id || "")}</div>
+    <div><strong>Overall Decision:</strong> ${escapeHtml(data.overall_result || "")}</div>
+  </div>
+  ${warnings ? `<h2>Warnings</h2><ul>${warnings}</ul>` : ""}
+  <h2>Must Checks</h2>
+  <table>
+    <thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead>
+    <tbody>${mustRows || "<tr><td colspan='4'>No data</td></tr>"}</tbody>
+  </table>
+  <h2>Supplementary Checks (Non-must)</h2>
+  <table>
+    <thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead>
+    <tbody>${suppRows || "<tr><td colspan='4'>No data</td></tr>"}</tbody>
+  </table>
+</body>
+</html>`;
+}
+
+function printResultToPdf() {
+  if (!latestResult) return;
+  const printWin = window.open("", "_blank");
+  if (!printWin) {
+    alert("Pop-up blocked. Please allow pop-ups for this page.");
+    return;
+  }
+  printWin.document.open();
+  printWin.document.write(buildPrintableHtml(latestResult));
+  printWin.document.close();
+  printWin.focus();
+  setTimeout(() => {
+    printWin.print();
+  }, 250);
+}
+
+function downloadResultText() {
+  if (!latestResult) return;
+  const text = buildPlainTextResult(latestResult);
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const fileToken = (latestResult.submission_id || latestResult.run_id || "simulation").replace(/[^a-zA-Z0-9._-]+/g, "_");
+  anchor.href = url;
+  anchor.download = `doaj-review-${fileToken}.txt`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function renderResult(data) {
+  const warnings = data.warnings || [];
+  document.getElementById("warnings").innerHTML = warnings.length
+    ? ("Warnings: " + warnings.map(w => `<code>${w}</code>`).join(" | "))
+    : "";
   if (!data.ok) {
-    setStatus("Run gagal: " + (data.errors || []).join("; "));
+    latestResult = null;
+    setResultActions(false);
+    setStatus("Run failed: " + (data.errors || []).join("; "));
     const artifacts = data.artifacts || {};
     document.getElementById("artifacts").innerHTML =
       Object.entries(artifacts).map(([k,v]) => `<div><a href="${v}" target="_blank">${k}</a></div>`).join("");
     return;
   }
+  latestResult = data;
+  setResultActions(true);
   setStatus(`run_id=${data.run_id} | overall=${data.overall_result}`);
   document.getElementById("artifacts").innerHTML =
     Object.entries(data.artifacts || {}).map(([k,v]) => `<div><a href="${v}" target="_blank">${k}</a></div>`).join("");
-  const rows = (data.checks || []).map(c =>
+  const rowsMain = (data.checks || []).map(c =>
+    `<tr><td><code>${c.rule_id}</code></td><td>${badge(c.result)}</td><td>${c.confidence}</td><td>${c.notes || ""}</td></tr>`
+  ).join("");
+  const rowsSupplementary = (data.supplementary_checks || []).map(c =>
     `<tr><td><code>${c.rule_id}</code></td><td>${badge(c.result)}</td><td>${c.confidence}</td><td>${c.notes || ""}</td></tr>`
   ).join("");
   document.getElementById("checks").innerHTML =
-    `<table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table>`;
+    `<h3>Must checks</h3><table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead><tbody>${rowsMain}</tbody></table>`
+    + `<h3 style="margin-top:12px;">Supplementary checks (non-must)</h3><table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead><tbody>${rowsSupplementary}</tbody></table>`;
 }
 
 async function loadRuns() {
@@ -444,26 +816,48 @@ async function loadRuns() {
   const items = (data.runs || []).map(r =>
     `<li><code>${r.run_id}</code> - ${r.overall_result} - <a href="${r.summary_json}" target="_blank">summary</a> - <a href="${r.raw_json}" target="_blank">raw</a></li>`
   ).join("");
-  document.getElementById("runs").innerHTML = items || "<li>Tidak ada run.</li>";
+  document.getElementById("runs").innerHTML = items || "<li>No runs yet.</li>";
 }
 
 document.getElementById("fillSample").addEventListener("click", () => {
   for (const [k,v] of Object.entries(sample)) document.getElementById(k).value = v;
+  for (const hint of manualPolicyHints) {
+    const textEl = document.getElementById("manual_text_" + hint);
+    const fileEl = document.getElementById("manual_pdf_" + hint);
+    if (textEl) textEl.value = "";
+    if (fileEl) fileEl.value = "";
+  }
+  document.getElementById("warnings").innerHTML = "";
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  resetForm();
+});
+
+document.getElementById("printPdfBtn").addEventListener("click", () => {
+  printResultToPdf();
+});
+
+document.getElementById("downloadTxtBtn").addEventListener("click", () => {
+  downloadResultText();
 });
 
 document.getElementById("submitBtn").addEventListener("click", async () => {
-  setStatus("Menjalankan simulation...");
+  setStatus("Running simulation...");
   document.getElementById("checks").innerHTML = "";
+  document.getElementById("warnings").innerHTML = "";
+  const payload = await payloadFromForm();
   const res = await fetch("/api/submit", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(payloadFromForm())
+    body: JSON.stringify(payload)
   });
   const data = await res.json();
   renderResult(data);
   await loadRuns();
 });
 
+setResultActions(false);
 loadRuns();
 </script>
 </body>
@@ -531,7 +925,10 @@ def make_handler(app: SimulationApp):
                     ctype = "application/json; charset=utf-8"
                 if candidate.suffix.lower() == ".md":
                     ctype = "text/markdown; charset=utf-8"
-                self._text(HTTPStatus.OK, candidate.read_text(encoding="utf-8"), ctype)
+                headers = None
+                if candidate.suffix.lower() == ".txt":
+                    headers = {"Content-Disposition": f'attachment; filename="{candidate.name}"'}
+                self._text(HTTPStatus.OK, candidate.read_text(encoding="utf-8"), ctype, headers=headers)
                 return
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["route not found"]})
 

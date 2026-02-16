@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from doaj_reviewer.sim_server import (
     SimulationApp,
@@ -41,14 +42,62 @@ class SimServerHelperTests(unittest.TestCase):
         self.assertEqual(raw["publication_model"], "issue_based")
         self.assertEqual(raw["source_urls"]["latest_content"][0], "https://journal.example/issue-2")
 
+    def test_build_raw_submission_with_manual_text_and_invalid_pdf(self) -> None:
+        payload = {
+            "submission_id": "SIM-MANUAL",
+            "journal_homepage_url": "https://journal.example",
+            "publication_model": "issue_based",
+            "open_access_statement": "https://journal.example/open-access",
+            "issn_consistency": "https://journal.example/about",
+            "publisher_identity": "https://journal.example/publisher",
+            "license_terms": "https://journal.example/licensing",
+            "copyright_author_rights": "https://journal.example/copyright",
+            "peer_review_policy": "https://journal.example/peer-review",
+            "aims_scope": "https://journal.example/aims-scope",
+            "editorial_board": "https://journal.example/editorial-board",
+            "latest_content": "https://journal.example/issue-1",
+            "instructions_for_authors": "https://journal.example/instructions",
+            "publication_fees_disclosure": "https://journal.example/apc",
+            "manual_policy_pages": [
+                {
+                    "rule_hint": "open_access_statement",
+                    "title": "Manual fallback text",
+                    "source_label": "manual://open_access_statement/text",
+                    "text": "This journal provides open access under CC BY terms.",
+                },
+                {
+                    "rule_hint": "peer_review_policy",
+                    "title": "Manual PDF",
+                    "source_label": "manual://peer_review_policy/pdf",
+                    "file_name": "peer-review.pdf",
+                    "pdf_base64": "this-is-not-base64",
+                },
+            ],
+        }
+        raw = build_raw_submission_from_form(payload)
+        self.assertIn("manual_policy_pages", raw)
+        self.assertEqual(len(raw["manual_policy_pages"]), 1)
+        self.assertEqual(raw["manual_policy_pages"][0]["rule_hint"], "open_access_statement")
+        self.assertIn("manual_input_warnings", raw)
+        self.assertTrue(any("could not be decoded" in item for item in raw["manual_input_warnings"]))
+
     def test_validate_raw_submission(self) -> None:
         valid = {
             "submission_id": "S1",
             "journal_homepage_url": "https://journal.example",
             "publication_model": "issue_based",
             "source_urls": {
+                "open_access_statement": ["https://journal.example/open-access"],
+                "issn_consistency": ["https://journal.example/about"],
+                "publisher_identity": ["https://journal.example/publisher"],
+                "license_terms": ["https://journal.example/licensing"],
+                "copyright_author_rights": ["https://journal.example/copyright"],
+                "peer_review_policy": ["https://journal.example/peer-review"],
+                "aims_scope": ["https://journal.example/aims-scope"],
                 "editorial_board": ["https://journal.example/editorial-board"],
                 "latest_content": ["https://journal.example/issue-1"],
+                "instructions_for_authors": ["https://journal.example/instructions"],
+                "publication_fees_disclosure": ["https://journal.example/apc"],
             },
         }
         invalid = {
@@ -59,6 +108,68 @@ class SimServerHelperTests(unittest.TestCase):
         }
         self.assertEqual(validate_raw_submission(valid), [])
         self.assertTrue(validate_raw_submission(invalid))
+
+    def test_run_submission_writes_summary_txt_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_dir = Path(tmpdir) / "runs"
+            app = SimulationApp(ruleset_path=RULESET_PATH, runs_dir=runs_dir)
+
+            payload = {
+                "submission_id": "SIM-ART-1",
+                "journal_homepage_url": "https://journal.example",
+                "publication_model": "issue_based",
+                "open_access_statement": "https://journal.example/open-access",
+                "issn_consistency": "https://journal.example/about",
+                "publisher_identity": "https://journal.example/publisher",
+                "license_terms": "https://journal.example/licensing",
+                "copyright_author_rights": "https://journal.example/copyright",
+                "peer_review_policy": "https://journal.example/peer-review",
+                "aims_scope": "https://journal.example/aims-scope",
+                "editorial_board": "https://journal.example/editorial-board",
+                "latest_content": "https://journal.example/issue-1",
+                "instructions_for_authors": "https://journal.example/instructions",
+                "publication_fees_disclosure": "https://journal.example/apc",
+            }
+
+            fake_structured = {
+                "submission_id": "SIM-ART-1",
+                "journal_homepage_url": "https://journal.example",
+                "publication_model": "issue_based",
+                "crawl_timestamp_utc": "2026-02-16T00:00:00Z",
+                "source_urls": {},
+                "role_people": [],
+                "units": [],
+                "evidence": [],
+                "policy_pages": [],
+            }
+            fake_summary = {
+                "submission_id": "SIM-ART-1",
+                "ruleset_id": "doaj.must.v1",
+                "overall_result": "pass",
+                "checks": [],
+                "supplementary_checks": [],
+            }
+            fake_endogeny = {
+                "rule_id": "doaj.endogeny.v1",
+                "result": "pass",
+                "confidence": 0.9,
+                "crawl_timestamp_utc": "2026-02-16T00:00:00Z",
+                "explanation_en": "Endogeny is within threshold.",
+                "computed_metrics": {"units": []},
+                "matched_articles": [],
+                "evidence": [],
+                "limitations": [],
+            }
+
+            with patch("doaj_reviewer.sim_server.build_structured_submission_from_raw", return_value=fake_structured):
+                with patch("doaj_reviewer.sim_server.run_review", return_value=(fake_summary, fake_endogeny)):
+                    result = app.run_submission(payload)
+
+            self.assertTrue(result["ok"])
+            self.assertIn("summary_txt", result["artifacts"])
+            run_id = str(result["run_id"])
+            summary_txt = runs_dir / run_id / "review-summary.txt"
+            self.assertTrue(summary_txt.exists())
 
     def test_export_csv_aggregates_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

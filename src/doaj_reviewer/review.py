@@ -9,6 +9,7 @@ from typing import Any
 
 from .basic_rules import (
     evaluate_aims_scope,
+    evaluate_archiving_policy,
     evaluate_copyright_author_rights,
     evaluate_editorial_board,
     evaluate_issn_consistency,
@@ -16,8 +17,10 @@ from .basic_rules import (
     evaluate_license_terms,
     evaluate_open_access_statement,
     evaluate_peer_review_policy,
+    evaluate_plagiarism_policy,
     evaluate_publisher_identity,
     evaluate_publication_fees_disclosure,
+    evaluate_repository_policy,
 )
 from .endogeny import evaluate_endogeny
 from .reporting import render_endogeny_markdown
@@ -83,11 +86,76 @@ def render_review_summary_markdown(summary: dict[str, Any]) -> str:
             )
             + " |"
         )
+
+    supplementary = summary.get("supplementary_checks", [])
+    if supplementary:
+        lines.append("")
+        lines.append("## Supplementary Checks (Non-must)")
+        lines.append("")
+        lines.append("| Rule ID | Result | Confidence | Evidence URLs | Notes |")
+        lines.append("|---|---|---:|---|---|")
+        for item in supplementary:
+            evidence_urls = item.get("evidence_urls", [])
+            evidence_text = "<br>".join(str(url) for url in evidence_urls[:3]) if isinstance(evidence_urls, list) else ""
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(item.get("rule_id", "")),
+                        str(item.get("result", "")),
+                        str(item.get("confidence", 0)),
+                        evidence_text,
+                        str(item.get("notes", "")),
+                    ]
+                )
+                + " |"
+            )
     return "\n".join(lines) + "\n"
+
+
+def render_review_summary_text(summary: dict[str, Any]) -> str:
+    lines: list[str] = []
+    lines.append("DOAJ Reviewer Summary")
+    lines.append("=" * 21)
+    lines.append(f"Submission ID : {summary.get('submission_id', '')}")
+    lines.append(f"Ruleset       : {summary.get('ruleset_id', '')}")
+    lines.append(f"Overall       : {summary.get('overall_result', '')}")
+    lines.append("")
+    lines.append("Must Checks")
+    lines.append("-" * 10)
+    for idx, check in enumerate(summary.get("checks", []), start=1):
+        lines.append(f"{idx}. Rule ID    : {check.get('rule_id', '')}")
+        lines.append(f"   Result     : {check.get('result', '')}")
+        lines.append(f"   Confidence : {check.get('confidence', 0)}")
+        lines.append(f"   Notes      : {check.get('notes', '')}")
+        evidence_urls = check.get("evidence_urls", [])
+        if isinstance(evidence_urls, list) and evidence_urls:
+            lines.append("   Evidence   :")
+            for url in evidence_urls[:5]:
+                lines.append(f"     - {url}")
+        lines.append("")
+
+    supplementary = summary.get("supplementary_checks", [])
+    if supplementary:
+        lines.append("Supplementary Checks (Non-must)")
+        lines.append("-" * 30)
+        for idx, item in enumerate(supplementary, start=1):
+            lines.append(f"{idx}. Rule ID    : {item.get('rule_id', '')}")
+            lines.append(f"   Result     : {item.get('result', '')}")
+            lines.append(f"   Confidence : {item.get('confidence', 0)}")
+            lines.append(f"   Notes      : {item.get('notes', '')}")
+            evidence_urls = item.get("evidence_urls", [])
+            if isinstance(evidence_urls, list) and evidence_urls:
+                lines.append("   Evidence   :")
+                for url in evidence_urls[:5]:
+                    lines.append(f"     - {url}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def run_review(submission: dict[str, Any], ruleset: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     checks_out: list[dict[str, Any]] = []
+    supplementary_checks: list[dict[str, Any]] = []
     endogeny_report: dict[str, Any] | None = None
     rule_evaluators = {
         "doaj.open_access_statement.v1": evaluate_open_access_statement,
@@ -101,6 +169,11 @@ def run_review(submission: dict[str, Any], ruleset: dict[str, Any]) -> tuple[dic
         "doaj.publisher_identity.v1": evaluate_publisher_identity,
         "doaj.issn_consistency.v1": evaluate_issn_consistency,
     }
+    supplementary_evaluators = [
+        evaluate_plagiarism_policy,
+        evaluate_archiving_policy,
+        evaluate_repository_policy,
+    ]
 
     for check in ruleset.get("checks", []):
         rule_id = str(check.get("rule_id", ""))
@@ -154,12 +227,25 @@ def run_review(submission: dict[str, Any], ruleset: dict[str, Any]) -> tuple[dic
             }
         )
 
+    for evaluator in supplementary_evaluators:
+        outcome = evaluator(submission)
+        supplementary_checks.append(
+            {
+                "rule_id": outcome.get("rule_id", ""),
+                "result": outcome.get("result", "need_human_review"),
+                "confidence": outcome.get("confidence", 0.0),
+                "notes": outcome.get("notes", ""),
+                "evidence_urls": outcome.get("evidence_urls", []),
+            }
+        )
+
     summary = {
         "submission_id": submission.get("submission_id", ""),
         "ruleset_id": ruleset.get("ruleset_id", ""),
         "ruleset_version": ruleset.get("version", ""),
         "overall_result": _overall_result(checks_out),
         "checks": checks_out,
+        "supplementary_checks": supplementary_checks,
     }
     if endogeny_report is None:
         endogeny_report = {
@@ -191,6 +277,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ruleset", default=DEFAULT_RULESET_PATH, help="Path to must-ruleset JSON.")
     parser.add_argument("--summary-json", default="artifacts/review-summary.json", help="Path to output summary JSON.")
     parser.add_argument("--summary-md", default="artifacts/review-summary.md", help="Path to output summary Markdown.")
+    parser.add_argument("--summary-txt", default="artifacts/review-summary.txt", help="Path to output summary text.")
     parser.add_argument("--endogeny-json", default="artifacts/endogeny-result.json", help="Path to output endogeny JSON.")
     parser.add_argument("--endogeny-md", default="artifacts/endogeny-report.md", help="Path to output endogeny Markdown.")
     return parser.parse_args()
@@ -204,6 +291,7 @@ def main() -> int:
 
     _write_json(Path(args.summary_json), summary)
     _write_text(Path(args.summary_md), render_review_summary_markdown(summary))
+    _write_text(Path(args.summary_txt), render_review_summary_text(summary))
     _write_json(Path(args.endogeny_json), endogeny)
     _write_text(Path(args.endogeny_md), render_endogeny_markdown(endogeny))
 
@@ -211,6 +299,7 @@ def main() -> int:
     print(f"Overall decision: {summary.get('overall_result', '')}")
     print(f"Summary JSON: {args.summary_json}")
     print(f"Summary MD: {args.summary_md}")
+    print(f"Summary TXT: {args.summary_txt}")
     print(f"Endogeny JSON: {args.endogeny_json}")
     print(f"Endogeny MD: {args.endogeny_md}")
     return 0

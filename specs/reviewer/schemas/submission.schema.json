@@ -36,7 +36,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "open_access_statement",
+        "issn_consistency",
+        "publisher_identity",
+        "license_terms",
+        "copyright_author_rights",
+        "peer_review_policy",
+        "aims_scope",
         "editorial_board",
+        "instructions_for_authors",
+        "publication_fees_disclosure",
         "latest_content"
       ],
       "properties": {
@@ -84,6 +93,13 @@
             "format": "uri"
           }
         },
+        "plagiarism_policy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
         "license_terms": {
           "type": "array",
           "items": {
@@ -120,6 +136,20 @@
           }
         },
         "aims_scope": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "archiving_policy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "repository_policy": {
           "type": "array",
           "items": {
             "type": "string",
@@ -301,7 +331,10 @@
               "publication_fees_disclosure",
               "publisher_identity",
               "issn_consistency",
+              "plagiarism_policy",
               "aims_scope",
+              "archiving_policy",
+              "repository_policy",
               "editorial_board",
               "instructions_for_authors"
             ]

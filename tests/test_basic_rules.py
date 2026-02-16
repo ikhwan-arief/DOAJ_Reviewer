@@ -23,21 +23,53 @@ def _submission_with_policy_pages(policy_pages):
         "publication_model": "issue_based",
         "source_urls": {
             "editorial_board": ["https://example.org/editorial-board"],
-            "latest_content": ["https://example.org/issue-1", "https://example.org/issue-2"],
             "open_access_statement": ["https://example.org/open-access"],
-            "peer_review_policy": ["https://example.org/peer-review"],
+            "issn_consistency": ["https://example.org/about"],
+            "publisher_identity": ["https://example.org/publisher"],
             "license_terms": ["https://example.org/licensing"],
             "copyright_author_rights": ["https://example.org/copyright"],
-            "publication_fees_disclosure": ["https://example.org/apc"],
-            "publisher_identity": ["https://example.org/publisher"],
-            "issn_consistency": ["https://example.org/about"],
+            "peer_review_policy": ["https://example.org/peer-review"],
+            "plagiarism_policy": [],
             "aims_scope": ["https://example.org/aims-and-scope"],
+            "publication_fees_disclosure": ["https://example.org/apc"],
+            "archiving_policy": [],
+            "repository_policy": [],
+            "reviewers": [],
+            "latest_content": ["https://example.org/issue-1", "https://example.org/issue-2"],
             "instructions_for_authors": ["https://example.org/instructions"],
+            "archives": [],
         },
         "role_people": [
-            {"name": "Dr Jane Smith", "role": "editor", "source_url": "https://example.org/editorial-board"},
-            {"name": "Asep Rahman", "role": "editorial_board_member", "source_url": "https://example.org/editorial-board"},
-            {"name": "Lina Putri", "role": "editorial_board_member", "source_url": "https://example.org/editorial-board"},
+            {
+                "name": "Dr Jane Smith",
+                "role": "editor",
+                "source_url": "https://example.org/editorial-board",
+                "affiliation": "Example University",
+            },
+            {
+                "name": "Asep Rahman",
+                "role": "editorial_board_member",
+                "source_url": "https://example.org/editorial-board",
+                "affiliation": "Institute A",
+            },
+            {
+                "name": "Lina Putri",
+                "role": "editorial_board_member",
+                "source_url": "https://example.org/editorial-board",
+                "affiliation": "Institute B",
+            },
+            {
+                "name": "Dwi Prasetyo",
+                "role": "editorial_board_member",
+                "source_url": "https://example.org/editorial-board",
+                "affiliation": "Institute C",
+            },
+            {
+                "name": "Rina Lestari",
+                "role": "editorial_board_member",
+                "source_url": "https://example.org/editorial-board",
+                "affiliation": "Institute D",
+            },
         ],
         "policy_pages": policy_pages,
     }
@@ -72,6 +104,21 @@ class BasicRuleTests(unittest.TestCase):
         result = evaluate_open_access_statement(submission)
         self.assertEqual(result["result"], "fail")
 
+    def test_missing_policy_mentions_waf_block(self) -> None:
+        submission = _submission_with_policy_pages([])
+        submission["source_urls"]["open_access_statement"] = ["https://example.org/open-access"]
+        submission["evidence"] = [
+            {
+                "kind": "crawl_note",
+                "url": "https://example.org/open-access",
+                "excerpt": "WAF/anti-bot challenge detected (cloudflare): checking your browser before accessing.",
+                "locator_hint": "policy-waf-blocked-open_access_statement",
+            }
+        ]
+        result = evaluate_open_access_statement(submission)
+        self.assertEqual(result["result"], "need_human_review")
+        self.assertIn("WAF/anti-bot challenge", result["notes"])
+
     def test_peer_review_pass(self) -> None:
         submission = _submission_with_policy_pages(
             [
@@ -79,12 +126,26 @@ class BasicRuleTests(unittest.TestCase):
                     "rule_hint": "peer_review_policy",
                     "url": "https://example.org/peer-review",
                     "title": "Peer Review",
-                    "text": "All manuscripts are peer reviewed with double blind process and editorial decision after reviewer reports.",
+                    "text": "All manuscripts are peer reviewed with double blind process. At least two independent reviewers evaluate each article before editorial decision.",
                 }
             ]
         )
         result = evaluate_peer_review_policy(submission)
         self.assertEqual(result["result"], "pass")
+
+    def test_peer_review_needs_human_when_two_reviewers_not_explicit(self) -> None:
+        submission = _submission_with_policy_pages(
+            [
+                {
+                    "rule_hint": "peer_review_policy",
+                    "url": "https://example.org/peer-review",
+                    "title": "Peer Review",
+                    "text": "The journal applies peer review and editorial decision process for each submission.",
+                }
+            ]
+        )
+        result = evaluate_peer_review_policy(submission)
+        self.assertEqual(result["result"], "need_human_review")
 
     def test_license_pass_and_fail_paths(self) -> None:
         pass_submission = _submission_with_policy_pages(
@@ -234,6 +295,113 @@ class BasicRuleTests(unittest.TestCase):
         )
         result = evaluate_editorial_board(submission)
         self.assertEqual(result["result"], "pass")
+
+    def test_editorial_board_leniency_with_reviewer_composition_pass(self) -> None:
+        submission = _submission_with_policy_pages(
+            [
+                {
+                    "rule_hint": "editorial_board",
+                    "url": "https://example.org/editorial-board",
+                    "title": "Editorial Board",
+                    "text": "Editor in Chief and editorial board members with affiliations are listed.",
+                },
+                {
+                    "rule_hint": "reviewers",
+                    "url": "https://example.org/reviewers",
+                    "title": "Reviewers",
+                    "text": "Reviewer list and affiliations.",
+                },
+                {
+                    "rule_hint": "publisher_identity",
+                    "url": "https://example.org/publisher",
+                    "title": "Publisher",
+                    "text": "Publisher: Example University Press. Address: City, Country.",
+                },
+            ]
+        )
+        submission["source_urls"]["reviewers"] = ["https://example.org/reviewers"]
+        for item in submission["role_people"]:
+            if item["role"] in {"editor", "editorial_board_member"}:
+                item["affiliation"] = "Example University Press"
+
+        reviewer_people = []
+        for idx in range(1, 5):
+            reviewer_people.append(
+                {
+                    "name": f"Reviewer Same {idx}",
+                    "role": "reviewer",
+                    "source_url": "https://example.org/reviewers",
+                    "affiliation": "Example University Press",
+                }
+            )
+        for idx in range(1, 7):
+            reviewer_people.append(
+                {
+                    "name": f"Reviewer Outside {idx}",
+                    "role": "reviewer",
+                    "source_url": "https://example.org/reviewers",
+                    "affiliation": f"Institute Outside {idx}",
+                }
+            )
+        submission["role_people"].extend(reviewer_people)
+
+        result = evaluate_editorial_board(submission)
+        self.assertEqual(result["result"], "pass")
+        self.assertIn("Editorial board affiliation composition (informational only)", result["notes"])
+        self.assertIn("Reviewer composition meets target range", result["notes"])
+
+    def test_reviewer_composition_fail_even_if_editorial_board_allowed(self) -> None:
+        submission = _submission_with_policy_pages(
+            [
+                {
+                    "rule_hint": "editorial_board",
+                    "url": "https://example.org/editorial-board",
+                    "title": "Editorial Board",
+                    "text": "Editor in Chief and editorial board members with affiliations are listed.",
+                },
+                {
+                    "rule_hint": "reviewers",
+                    "url": "https://example.org/reviewers",
+                    "title": "Reviewers",
+                    "text": "Reviewer list and affiliations.",
+                },
+                {
+                    "rule_hint": "publisher_identity",
+                    "url": "https://example.org/publisher",
+                    "title": "Publisher",
+                    "text": "Publisher: Example University Press. Address: City, Country.",
+                },
+            ]
+        )
+        submission["source_urls"]["reviewers"] = ["https://example.org/reviewers"]
+        for item in submission["role_people"]:
+            if item["role"] in {"editor", "editorial_board_member"}:
+                item["affiliation"] = "Example University Press"
+
+        reviewer_people = []
+        for idx in range(1, 8):
+            reviewer_people.append(
+                {
+                    "name": f"Reviewer Same {idx}",
+                    "role": "reviewer",
+                    "source_url": "https://example.org/reviewers",
+                    "affiliation": "Example University Press",
+                }
+            )
+        for idx in range(1, 4):
+            reviewer_people.append(
+                {
+                    "name": f"Reviewer Outside {idx}",
+                    "role": "reviewer",
+                    "source_url": "https://example.org/reviewers",
+                    "affiliation": f"Institute Outside {idx}",
+                }
+            )
+        submission["role_people"].extend(reviewer_people)
+
+        result = evaluate_editorial_board(submission)
+        self.assertEqual(result["result"], "fail")
+        self.assertIn("Reviewer affiliation composition is outside target range", result["notes"])
 
 
 if __name__ == "__main__":

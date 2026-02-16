@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from doaj_reviewer.web import (
     ParsedDocument,
+    detect_waf_challenge,
     fetch_parsed_document_with_fallback,
     needs_js_render,
     parse_html,
@@ -106,6 +107,47 @@ class WebHeuristicTests(unittest.TestCase):
                 )
         self.assertEqual(doc.status_code, 200)
         self.assertEqual(doc.title, "Policy Page")
+
+    def test_detect_waf_cloudflare_challenge(self) -> None:
+        html = """
+        <html>
+          <head><title>Just a moment...</title></head>
+          <body>
+            <h1>Checking your browser before accessing example.org</h1>
+            <p>Please enable JavaScript and Cookies.</p>
+            <div>Ray ID: 8abced1234</div>
+          </body>
+        </html>
+        """
+        doc = parse_html(
+            url="https://example.org/policy",
+            status_code=503,
+            content_type="text/html",
+            html=html,
+        )
+        detection = detect_waf_challenge(doc)
+        self.assertTrue(detection["blocked"])
+        self.assertEqual(detection["provider"], "cloudflare")
+
+    def test_detect_waf_false_for_normal_policy_page(self) -> None:
+        html = """
+        <html>
+          <head><title>Open Access Policy</title></head>
+          <body>
+            <h1>Open Access Policy</h1>
+            <p>All articles are available without charge and distributed under CC BY.</p>
+            <p>The policy also explains usage rights and archiving routes.</p>
+          </body>
+        </html>
+        """
+        doc = parse_html(
+            url="https://example.org/open-access",
+            status_code=200,
+            content_type="text/html",
+            html=html,
+        )
+        detection = detect_waf_challenge(doc)
+        self.assertFalse(detection["blocked"])
 
 
 if __name__ == "__main__":

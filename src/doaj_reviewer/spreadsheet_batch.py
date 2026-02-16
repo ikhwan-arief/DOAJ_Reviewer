@@ -14,40 +14,52 @@ from .reporting import render_endogeny_markdown
 
 
 LIST_FIELDS = [
+    "open_access_statement",
+    "issn_consistency",
+    "publisher_identity",
+    "license_terms",
+    "copyright_author_rights",
+    "peer_review_policy",
+    "plagiarism_policy",
+    "aims_scope",
     "editorial_board",
     "reviewers",
     "latest_content",
-    "archives",
-    "open_access_statement",
-    "aims_scope",
     "instructions_for_authors",
-    "peer_review_policy",
-    "license_terms",
-    "copyright_author_rights",
     "publication_fees_disclosure",
-    "publisher_identity",
-    "issn_consistency",
+    "archiving_policy",
+    "repository_policy",
+    "archives",
 ]
 
 REQUIRED_COLUMNS = [
     "submission_id",
     "journal_homepage_url",
     "publication_model",
+    "open_access_statement_urls",
+    "issn_consistency_urls",
+    "publisher_identity_urls",
+    "license_terms_urls",
+    "copyright_author_rights_urls",
+    "peer_review_policy_urls",
+    "aims_scope_urls",
     "editorial_board_urls",
+    "instructions_for_authors_urls",
+    "publication_fees_disclosure_urls",
     "latest_content_urls",
 ]
 
 RESULT_RULE_COLUMNS = [
     "doaj.open_access_statement.v1",
+    "doaj.issn_consistency.v1",
+    "doaj.publisher_identity.v1",
+    "doaj.license_terms.v1",
+    "doaj.copyright_author_rights.v1",
+    "doaj.peer_review_policy.v1",
     "doaj.aims_scope.v1",
     "doaj.editorial_board.v1",
     "doaj.instructions_for_authors.v1",
-    "doaj.peer_review_policy.v1",
-    "doaj.license_terms.v1",
-    "doaj.copyright_author_rights.v1",
     "doaj.publication_fees_disclosure.v1",
-    "doaj.publisher_identity.v1",
-    "doaj.issn_consistency.v1",
     "doaj.endogeny.v1",
 ]
 
@@ -70,19 +82,22 @@ def _split_urls(cell: str, list_sep: str) -> list[str]:
 
 def _row_to_raw_submission(row: dict[str, str], list_sep: str) -> dict[str, Any]:
     source_urls = {
+        "open_access_statement": _split_urls(row.get("open_access_statement_urls", ""), list_sep),
+        "issn_consistency": _split_urls(row.get("issn_consistency_urls", ""), list_sep),
+        "publisher_identity": _split_urls(row.get("publisher_identity_urls", ""), list_sep),
+        "license_terms": _split_urls(row.get("license_terms_urls", ""), list_sep),
+        "copyright_author_rights": _split_urls(row.get("copyright_author_rights_urls", ""), list_sep),
+        "peer_review_policy": _split_urls(row.get("peer_review_policy_urls", ""), list_sep),
+        "plagiarism_policy": _split_urls(row.get("plagiarism_policy_urls", ""), list_sep),
+        "aims_scope": _split_urls(row.get("aims_scope_urls", ""), list_sep),
         "editorial_board": _split_urls(row.get("editorial_board_urls", ""), list_sep),
         "reviewers": _split_urls(row.get("reviewers_urls", ""), list_sep),
         "latest_content": _split_urls(row.get("latest_content_urls", ""), list_sep),
-        "archives": _split_urls(row.get("archives_urls", ""), list_sep),
-        "open_access_statement": _split_urls(row.get("open_access_statement_urls", ""), list_sep),
-        "aims_scope": _split_urls(row.get("aims_scope_urls", ""), list_sep),
         "instructions_for_authors": _split_urls(row.get("instructions_for_authors_urls", ""), list_sep),
-        "peer_review_policy": _split_urls(row.get("peer_review_policy_urls", ""), list_sep),
-        "license_terms": _split_urls(row.get("license_terms_urls", ""), list_sep),
-        "copyright_author_rights": _split_urls(row.get("copyright_author_rights_urls", ""), list_sep),
         "publication_fees_disclosure": _split_urls(row.get("publication_fees_disclosure_urls", ""), list_sep),
-        "publisher_identity": _split_urls(row.get("publisher_identity_urls", ""), list_sep),
-        "issn_consistency": _split_urls(row.get("issn_consistency_urls", ""), list_sep),
+        "archiving_policy": _split_urls(row.get("archiving_policy_urls", ""), list_sep),
+        "repository_policy": _split_urls(row.get("repository_policy_urls", ""), list_sep),
+        "archives": _split_urls(row.get("archives_urls", ""), list_sep),
     }
     return {
         "submission_id": (row.get("submission_id", "") or "").strip(),
@@ -101,10 +116,22 @@ def _validate_raw_submission(raw: dict[str, Any]) -> list[str]:
     if raw.get("publication_model") not in {"issue_based", "continuous"}:
         errors.append("publication_model must be issue_based or continuous")
     source_urls = raw.get("source_urls", {})
-    if not source_urls.get("editorial_board"):
-        errors.append("editorial_board_urls is required")
-    if not source_urls.get("latest_content"):
-        errors.append("latest_content_urls is required")
+    required_hints = [
+        "open_access_statement",
+        "issn_consistency",
+        "publisher_identity",
+        "license_terms",
+        "copyright_author_rights",
+        "peer_review_policy",
+        "aims_scope",
+        "editorial_board",
+        "instructions_for_authors",
+        "publication_fees_disclosure",
+        "latest_content",
+    ]
+    for hint in required_hints:
+        if not source_urls.get(hint):
+            errors.append(f"{hint}_urls is required")
     return errors
 
 

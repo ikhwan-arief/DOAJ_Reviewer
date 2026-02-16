@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import unittest
 
-from doaj_reviewer.review import run_review
+from doaj_reviewer.review import render_review_summary_text, run_review
 
 
 class ReviewRunnerTests(unittest.TestCase):
@@ -35,6 +35,36 @@ class ReviewRunnerTests(unittest.TestCase):
         self.assertEqual(by_rule["doaj.publication_fees_disclosure.v1"]["result"], "pass")
         self.assertEqual(by_rule["doaj.publisher_identity.v1"]["result"], "pass")
         self.assertEqual(by_rule["doaj.issn_consistency.v1"]["result"], "pass")
+
+    def test_render_review_summary_text(self) -> None:
+        summary = {
+            "submission_id": "SIM-TXT-1",
+            "ruleset_id": "doaj.must.v1",
+            "overall_result": "need_human_review",
+            "checks": [
+                {
+                    "rule_id": "doaj.open_access_statement.v1",
+                    "result": "pass",
+                    "confidence": 0.81,
+                    "notes": "Open access statement found.",
+                    "evidence_urls": ["https://example.org/open-access"],
+                }
+            ],
+            "supplementary_checks": [
+                {
+                    "rule_id": "doaj.plagiarism_policy.v1",
+                    "result": "need_human_review",
+                    "confidence": 0.62,
+                    "notes": "Threshold not explicit.",
+                    "evidence_urls": ["https://example.org/plagiarism"],
+                }
+            ],
+        }
+        text = render_review_summary_text(summary)
+        self.assertIn("DOAJ Reviewer Summary", text)
+        self.assertIn("Submission ID : SIM-TXT-1", text)
+        self.assertIn("Must Checks", text)
+        self.assertIn("Supplementary Checks (Non-must)", text)
 
 
 if __name__ == "__main__":

@@ -221,6 +221,71 @@ def fetch_parsed_document_playwright(url: str, timeout_seconds: int = 20) -> Par
     return parse_html(url=url, status_code=status_code, content_type=content_type, html=html)
 
 
+def detect_waf_challenge(doc: ParsedDocument) -> dict[str, Any]:
+    blob = f"{doc.title}\n{doc.text[:5000]}\n{doc.raw_html[:15000]}".lower()
+    status_suspicious = doc.status_code in {401, 403, 406, 409, 429, 503}
+
+    provider = ""
+    if any(token in blob for token in ["cloudflare", "__cf_chl_", "cf-ray", "cf-chl", "just a moment..."]):
+        provider = "cloudflare"
+    elif any(token in blob for token in ["akamai", "akamai ghost", "akamaibot"]):
+        provider = "akamai"
+    elif any(token in blob for token in ["imperva", "incapsula"]):
+        provider = "imperva"
+    elif any(token in blob for token in ["sucuri", "sucuri website firewall"]):
+        provider = "sucuri"
+    elif any(token in blob for token in ["web application firewall", "waf", "ddos protection"]):
+        provider = "generic_waf"
+
+    strong_markers = [
+        "checking your browser before accessing",
+        "attention required!",
+        "verify you are human",
+        "please enable cookies",
+        "captcha",
+        "turnstile",
+        "security check",
+        "request blocked",
+        "access denied",
+        "automated queries",
+        "bot protection",
+        "challenge platform",
+    ]
+    generic_markers = [
+        "forbidden",
+        "temporarily unavailable",
+        "rate limited",
+        "too many requests",
+        "blocked",
+        "challenge",
+    ]
+
+    matched_strong = [token for token in strong_markers if token in blob]
+    matched_generic = [token for token in generic_markers if token in blob]
+    marker_count = len(matched_strong) + len(matched_generic)
+    is_short_shell = len(doc.text.strip()) < 700
+
+    blocked = False
+    if matched_strong and (status_suspicious or is_short_shell or provider):
+        blocked = True
+    elif provider and marker_count >= 2 and (status_suspicious or is_short_shell):
+        blocked = True
+    elif status_suspicious and marker_count >= 3:
+        blocked = True
+
+    reason = ""
+    if matched_strong:
+        reason = matched_strong[0]
+    elif matched_generic:
+        reason = matched_generic[0]
+
+    return {
+        "blocked": blocked,
+        "provider": provider,
+        "reason": reason,
+    }
+
+
 def needs_js_render(doc: ParsedDocument) -> bool:
     html_l = doc.raw_html.lower()
     text_len = len(doc.text.strip())

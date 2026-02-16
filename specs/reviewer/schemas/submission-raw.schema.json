@@ -30,7 +30,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "open_access_statement",
+        "issn_consistency",
+        "publisher_identity",
+        "license_terms",
+        "copyright_author_rights",
+        "peer_review_policy",
+        "aims_scope",
         "editorial_board",
+        "instructions_for_authors",
+        "publication_fees_disclosure",
         "latest_content"
       ],
       "properties": {
@@ -72,6 +81,13 @@
           }
         },
         "peer_review_policy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "plagiarism_policy": {
           "type": "array",
           "items": {
             "type": "string",
@@ -120,6 +136,20 @@
             "format": "uri"
           }
         },
+        "archiving_policy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "repository_policy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
         "instructions_for_authors": {
           "type": "array",
           "items": {
@@ -127,6 +157,53 @@
             "format": "uri"
           }
         }
+      }
+    },
+    "manual_policy_pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_hint",
+          "url",
+          "title",
+          "text"
+        ],
+        "properties": {
+          "rule_hint": {
+            "type": "string",
+            "enum": [
+              "open_access_statement",
+              "peer_review_policy",
+              "license_terms",
+              "copyright_author_rights",
+              "publication_fees_disclosure",
+              "publisher_identity",
+              "issn_consistency",
+              "plagiarism_policy",
+              "aims_scope",
+              "archiving_policy",
+              "repository_policy",
+              "instructions_for_authors"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "manual_input_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
       }
     }
   }

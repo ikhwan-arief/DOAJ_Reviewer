@@ -42,6 +42,9 @@
     ],
     "instructions_for_authors": [
       "https://example-journal.org/instructions"
-    ]
+    ],
+    "plagiarism_policy": [],
+    "archiving_policy": [],
+    "repository_policy": []
   }
 }

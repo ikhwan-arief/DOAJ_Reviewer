@@ -18,8 +18,8 @@ class SpreadsheetBatchTests(unittest.TestCase):
             csv_path.write_text(
                 textwrap.dedent(
                     """\
-                    submission_id,journal_homepage_url,publication_model,editorial_board_urls,reviewers_urls,latest_content_urls,archives_urls,open_access_statement_urls,aims_scope_urls,instructions_for_authors_urls,peer_review_policy_urls,license_terms_urls,copyright_author_rights_urls,publication_fees_disclosure_urls,publisher_identity_urls,issn_consistency_urls
-                    B1,https://journal.example,issue_based,https://journal.example/editorial-board,,https://journal.example/issue-2|https://journal.example/issue-1,,,,,,,,,,
+                    submission_id,journal_homepage_url,publication_model,open_access_statement_urls,issn_consistency_urls,publisher_identity_urls,license_terms_urls,copyright_author_rights_urls,peer_review_policy_urls,plagiarism_policy_urls,aims_scope_urls,editorial_board_urls,reviewers_urls,latest_content_urls,instructions_for_authors_urls,publication_fees_disclosure_urls,archiving_policy_urls,repository_policy_urls,archives_urls
+                    B1,https://journal.example,issue_based,https://journal.example/open-access,https://journal.example/about,https://journal.example/publisher,https://journal.example/licensing,https://journal.example/copyright,https://journal.example/peer-review,,https://journal.example/aims-scope,https://journal.example/editorial-board,,https://journal.example/issue-2|https://journal.example/issue-1,https://journal.example/instructions,https://journal.example/apc,,,
                     """
                 ),
                 encoding="utf-8",

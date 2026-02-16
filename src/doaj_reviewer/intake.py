@@ -7,11 +7,14 @@ from pathlib import Path
 import argparse
 import json
 import re
+import time
 from typing import Any
+from urllib.parse import urlparse
 
 from .endogeny import normalize_name
 from .web import (
     ParsedDocument,
+    detect_waf_challenge,
     fetch_parsed_document_with_fallback,
     flatten_meta_values,
     safe_excerpt,
@@ -24,6 +27,10 @@ from .web import (
 DEFAULT_TIMEOUT_SECONDS = 18
 DEFAULT_MAX_ARTICLES_PER_UNIT = 40
 DEFAULT_MAX_LINK_CANDIDATES = 120
+DEFAULT_DOMAIN_MIN_DELAY_SECONDS = 0.35
+DEFAULT_FETCH_MAX_RETRIES = 3
+DEFAULT_RETRY_BASE_DELAY_SECONDS = 0.8
+RETRYABLE_STATUS_CODES = {403, 429, 503}
 EXCLUDED_ARTICLE_TYPE_TERMS = {
     "editorial",
     "correction",
@@ -42,13 +49,16 @@ ROLE_KEYWORDS = {
 }
 POLICY_HINT_KEYS = (
     "open_access_statement",
-    "peer_review_policy",
+    "issn_consistency",
+    "publisher_identity",
     "license_terms",
     "copyright_author_rights",
-    "publication_fees_disclosure",
-    "publisher_identity",
-    "issn_consistency",
+    "peer_review_policy",
+    "plagiarism_policy",
     "aims_scope",
+    "publication_fees_disclosure",
+    "archiving_policy",
+    "repository_policy",
     "instructions_for_authors",
 )
 STOPWORDS = {
@@ -72,6 +82,22 @@ STOPWORDS = {
     "access",
 }
 PERSON_PATTERN = re.compile(r"[A-Z][A-Za-z'`\-]+(?:\s+[A-Z][A-Za-z'`\-]+){1,4}")
+AFFILIATION_KEYWORDS = {
+    "university",
+    "institute",
+    "department",
+    "faculty",
+    "school",
+    "college",
+    "hospital",
+    "center",
+    "centre",
+    "academy",
+    "press",
+    "laboratory",
+    "laboratoire",
+    "research",
+}
 
 
 def _now_iso_utc() -> str:
@@ -88,6 +114,103 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
+
+
+def _build_throttled_fetcher(
+    base_fetcher,
+    min_delay_seconds: float = DEFAULT_DOMAIN_MIN_DELAY_SECONDS,
+    max_retries: int = DEFAULT_FETCH_MAX_RETRIES,
+    retry_base_delay_seconds: float = DEFAULT_RETRY_BASE_DELAY_SECONDS,
+):
+    domain_next_allowed: dict[str, float] = {}
+    retries = max(1, int(max_retries))
+    min_delay = max(0.0, float(min_delay_seconds))
+    base_delay = max(0.0, float(retry_base_delay_seconds))
+
+    def _sleep_for_domain(domain: str) -> None:
+        if not domain or min_delay <= 0:
+            return
+        wait_until = domain_next_allowed.get(domain, 0.0)
+        now = time.monotonic()
+        if wait_until > now:
+            time.sleep(wait_until - now)
+
+    def _mark_domain_visit(domain: str) -> None:
+        if not domain or min_delay <= 0:
+            return
+        domain_next_allowed[domain] = time.monotonic() + min_delay
+
+    def _fetch(url: str, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
+        domain = (urlparse(url).netloc or "").lower()
+        last_exc: Exception | None = None
+
+        for attempt in range(retries):
+            _sleep_for_domain(domain)
+            try:
+                doc = base_fetcher(url, timeout_seconds=timeout_seconds)
+                _mark_domain_visit(domain)
+                if doc.status_code in RETRYABLE_STATUS_CODES and attempt < retries - 1:
+                    if base_delay > 0:
+                        time.sleep(base_delay * (2**attempt))
+                    continue
+                return doc
+            except Exception as exc:
+                _mark_domain_visit(domain)
+                last_exc = exc
+                if attempt >= retries - 1:
+                    break
+                if base_delay > 0:
+                    time.sleep(base_delay * (2**attempt))
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"Failed to fetch URL after {retries} attempt(s): {url}")
+
+    return _fetch
+
+
+def _waf_crawl_note(url: str, locator_hint: str, detection: dict[str, Any]) -> dict[str, str]:
+    provider = str(detection.get("provider", "")).strip() or "unknown provider"
+    reason = str(detection.get("reason", "")).strip() or "challenge page detected"
+    excerpt = f"WAF/anti-bot challenge detected ({provider}): {reason}."
+    return {
+        "kind": "crawl_note",
+        "url": url,
+        "excerpt": safe_excerpt(excerpt, limit=280),
+        "locator_hint": locator_hint,
+    }
+
+
+def _normalize_manual_policy_pages(raw_submission: dict[str, Any]) -> list[dict[str, str]]:
+    raw_items = raw_submission.get("manual_policy_pages", [])
+    if not isinstance(raw_items, list):
+        return []
+
+    out: list[dict[str, str]] = []
+    for index, item in enumerate(raw_items, start=1):
+        if not isinstance(item, dict):
+            continue
+        hint = str(item.get("rule_hint", "")).strip()
+        text = str(item.get("text", "")).strip()
+        title = str(item.get("title", "")).strip() or f"Manual fallback text ({hint})"
+        source_label = str(item.get("source_label", "")).strip() or f"manual://{hint}/{index}"
+        if "://" not in source_label:
+            source_label = f"manual://{hint}/{index}"
+
+        if hint not in POLICY_HINT_KEYS:
+            continue
+        if not text:
+            continue
+
+        out.append(
+            {
+                "rule_hint": hint,
+                "url": source_label,
+                "title": title[:180],
+                "text": text[:120000],
+            }
+        )
+    return out
 
 
 def _looks_like_person_name(raw_name: str) -> bool:
@@ -126,11 +249,68 @@ def _extract_person_names_from_line(line: str) -> list[str]:
     return [candidate for candidate in candidates if _looks_like_person_name(candidate)]
 
 
+def _clean_affiliation(text: str) -> str:
+    value = re.sub(r"\s+", " ", text or "").strip(" -,:;|()[]")
+    return value[:180]
+
+
+def _looks_like_affiliation(text: str) -> bool:
+    value = _clean_affiliation(text).lower()
+    if len(value) < 6:
+        return False
+    if value.startswith(("editor", "reviewer", "board", "chief")):
+        return False
+    return any(keyword in value for keyword in AFFILIATION_KEYWORDS)
+
+
+def _extract_affiliation_from_line(line: str, person_name: str) -> str:
+    raw = line or ""
+    name = person_name or ""
+    candidate = ""
+
+    if name and name in raw:
+        tail = raw.split(name, 1)[1]
+        candidate = _clean_affiliation(tail)
+        if _looks_like_affiliation(candidate):
+            return candidate
+
+    if "-" in raw:
+        right = _clean_affiliation(raw.split("-", 1)[1])
+        if _looks_like_affiliation(right):
+            return right
+    if "," in raw:
+        right = _clean_affiliation(raw.split(",", 1)[1])
+        if _looks_like_affiliation(right):
+            return right
+
+    return ""
+
+
 def extract_role_people_from_document(doc: ParsedDocument, default_role: str) -> list[dict[str, str]]:
     lines = [line.strip() for line in doc.text.splitlines() if line.strip()]
     people: list[dict[str, str]] = []
     seen = set()
     active_role = default_role
+
+    def _append_person(name: str, role: str, affiliation: str) -> None:
+        key = (normalize_name(name), role)
+        if key in seen:
+            if affiliation:
+                for item in people:
+                    if normalize_name(item.get("name", "")) == key[0] and item.get("role", "") == role:
+                        if not str(item.get("affiliation", "")).strip():
+                            item["affiliation"] = affiliation
+                        break
+            return
+        seen.add(key)
+        payload = {
+            "name": name,
+            "role": role,
+            "source_url": doc.url,
+        }
+        if affiliation:
+            payload["affiliation"] = affiliation
+        people.append(payload)
 
     for line in lines:
         active_role = _find_role_from_line(line, active_role)
@@ -139,29 +319,10 @@ def extract_role_people_from_document(doc: ParsedDocument, default_role: str) ->
         if "-" in line or "," in line:
             primary = re.split(r"[-,;|]", line, maxsplit=1)[0].strip()
             if _looks_like_person_name(primary):
-                key = (normalize_name(primary), active_role)
-                if key not in seen:
-                    seen.add(key)
-                    people.append(
-                        {
-                            "name": primary,
-                            "role": active_role,
-                            "source_url": doc.url,
-                        }
-                    )
+                _append_person(primary, active_role, _extract_affiliation_from_line(line, primary))
 
         for candidate in _extract_person_names_from_line(line):
-            key = (normalize_name(candidate), active_role)
-            if key in seen:
-                continue
-            seen.add(key)
-            people.append(
-                {
-                    "name": candidate,
-                    "role": active_role,
-                    "source_url": doc.url,
-                }
-            )
+            _append_person(candidate, active_role, _extract_affiliation_from_line(line, candidate))
 
     return people
 
@@ -291,10 +452,23 @@ def collect_research_articles_from_unit(
     fetcher=None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     if fetcher is None:
-        def fetcher(url: str, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
-            return fetch_parsed_document_with_fallback(url=url, timeout_seconds=timeout_seconds, js_mode="auto")
+        base_fetcher = lambda url, timeout_seconds=DEFAULT_TIMEOUT_SECONDS: fetch_parsed_document_with_fallback(
+            url=url, timeout_seconds=timeout_seconds, js_mode="auto"
+        )
+        fetcher = _build_throttled_fetcher(base_fetcher)
 
     unit_doc = fetcher(unit_url, timeout_seconds=timeout_seconds)
+    unit_waf = detect_waf_challenge(unit_doc)
+    if unit_waf.get("blocked", False):
+        evidence = [_waf_crawl_note(unit_url, "unit-waf-blocked", unit_waf)]
+        unit = {
+            "label": unit_doc.title.strip() or unit_url,
+            "window_type": "issue",
+            "source_url": unit_url,
+            "research_articles": [],
+        }
+        return unit, evidence
+
     unit_label = unit_doc.title.strip() or unit_url
     evidence: list[dict[str, str]] = [
         {
@@ -317,6 +491,10 @@ def collect_research_articles_from_unit(
         try:
             article_doc = fetcher(article_url, timeout_seconds=timeout_seconds)
         except Exception:
+            continue
+        article_waf = detect_waf_challenge(article_doc)
+        if article_waf.get("blocked", False):
+            evidence.append(_waf_crawl_note(article_url, "article-waf-blocked", article_waf))
             continue
         article = extract_article_from_document(article_doc)
         if article is None:
@@ -377,6 +555,10 @@ def collect_policy_pages(
                     }
                 )
                 continue
+            detection = detect_waf_challenge(doc)
+            if detection.get("blocked", False):
+                evidence.append(_waf_crawl_note(url, f"policy-waf-blocked-{hint}", detection))
+                continue
 
             policy_pages.append(
                 {
@@ -406,8 +588,10 @@ def build_structured_submission_from_raw(
     js_mode: str = "auto",
 ) -> dict[str, Any]:
     if fetcher is None:
-        def fetcher(url: str, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
+        def base_fetcher(url: str, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS):
             return fetch_parsed_document_with_fallback(url=url, timeout_seconds=timeout_seconds, js_mode=js_mode)
+
+        fetcher = _build_throttled_fetcher(base_fetcher)
 
     submission_id = str(raw_submission.get("submission_id", ""))
     homepage = str(raw_submission.get("journal_homepage_url", ""))
@@ -425,7 +609,10 @@ def build_structured_submission_from_raw(
     publication_fees_disclosure_urls = list(source_urls.get("publication_fees_disclosure", []))
     publisher_identity_urls = list(source_urls.get("publisher_identity", []))
     issn_consistency_urls = list(source_urls.get("issn_consistency", []))
+    plagiarism_policy_urls = list(source_urls.get("plagiarism_policy", []))
     aims_scope_urls = list(source_urls.get("aims_scope", []))
+    archiving_policy_urls = list(source_urls.get("archiving_policy", []))
+    repository_policy_urls = list(source_urls.get("repository_policy", []))
     instructions_for_authors_urls = list(source_urls.get("instructions_for_authors", []))
 
     evidence: list[dict[str, str]] = []
@@ -437,6 +624,18 @@ def build_structured_submission_from_raw(
         fetcher=fetcher,
     )
     evidence.extend(policy_evidence)
+    manual_policy_pages = _normalize_manual_policy_pages(raw_submission)
+    if manual_policy_pages:
+        policy_pages.extend(manual_policy_pages)
+        for page in manual_policy_pages:
+            evidence.append(
+                {
+                    "kind": "policy_text",
+                    "url": page["url"],
+                    "excerpt": safe_excerpt(" | ".join(top_lines(page["text"], limit=4))),
+                    "locator_hint": f"manual-policy-{page['rule_hint']}",
+                }
+            )
 
     for url in editorial_urls:
         try:
@@ -450,6 +649,10 @@ def build_structured_submission_from_raw(
                     "locator_hint": "fetch-error",
                 }
             )
+            continue
+        detection = detect_waf_challenge(doc)
+        if detection.get("blocked", False):
+            evidence.append(_waf_crawl_note(url, "editorial-waf-blocked", detection))
             continue
         names = extract_role_people_from_document(doc, default_role="editorial_board_member")
         for person in names:
@@ -487,6 +690,10 @@ def build_structured_submission_from_raw(
                     "locator_hint": "fetch-error",
                 }
             )
+            continue
+        detection = detect_waf_challenge(doc)
+        if detection.get("blocked", False):
+            evidence.append(_waf_crawl_note(url, "reviewer-waf-blocked", detection))
             continue
         names = extract_role_people_from_document(doc, default_role="reviewer")
         for person in names:
@@ -603,7 +810,10 @@ def build_structured_submission_from_raw(
             "publication_fees_disclosure": publication_fees_disclosure_urls,
             "publisher_identity": publisher_identity_urls,
             "issn_consistency": issn_consistency_urls,
+            "plagiarism_policy": plagiarism_policy_urls,
             "aims_scope": aims_scope_urls,
+            "archiving_policy": archiving_policy_urls,
+            "repository_policy": repository_policy_urls,
             "instructions_for_authors": instructions_for_authors_urls,
         },
         "role_people": role_people,
