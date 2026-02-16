@@ -35,6 +35,12 @@ class ReviewRunnerTests(unittest.TestCase):
         self.assertEqual(by_rule["doaj.publication_fees_disclosure.v1"]["result"], "pass")
         self.assertEqual(by_rule["doaj.publisher_identity.v1"]["result"], "pass")
         self.assertEqual(by_rule["doaj.issn_consistency.v1"]["result"], "pass")
+        self.assertIn("generated_at_utc", summary)
+        self.assertIn("must_result_counts", summary)
+        self.assertIn("traceability", summary)
+        self.assertIn("source_urls", by_rule["doaj.open_access_statement.v1"])
+        self.assertIn("policy_pages", by_rule["doaj.open_access_statement.v1"])
+        self.assertIn("evidence_status", by_rule["doaj.open_access_statement.v1"])
 
     def test_render_review_summary_text(self) -> None:
         summary = {
@@ -62,7 +68,8 @@ class ReviewRunnerTests(unittest.TestCase):
         }
         text = render_review_summary_text(summary)
         self.assertIn("DOAJ Reviewer Summary", text)
-        self.assertIn("Submission ID : SIM-TXT-1", text)
+        self.assertIn("Submission ID       : SIM-TXT-1", text)
+        self.assertIn("Decision Snapshot", text)
         self.assertIn("Must Checks", text)
         self.assertIn("Supplementary Checks (Non-must)", text)
 

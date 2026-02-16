@@ -181,7 +181,7 @@ Open:
 Useful endpoints:
 
 - `GET /api/runs` (default latest 20, supports `?limit=all` or `?limit=<n>`)
-- `GET /api/export.csv?limit=all` (download all runs summary as CSV)
+- `GET /api/export.csv?limit=all` (download detailed runs CSV: per-rule status, notes, and problematic URLs for flagged results)
 - `GET /runs/<run_id>/<artifact-file>` (download run artifacts)
 
 ## GitHub Actions

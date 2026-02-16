@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .intake import build_structured_submission_from_raw
-from .review import render_review_summary_markdown, run_review
+from .review import render_review_summary_markdown, render_review_summary_text, run_review
 from .reporting import render_endogeny_markdown
 
 
@@ -194,6 +194,7 @@ def run_batch(
             structured_path = base / "submission.structured.json"
             summary_json_path = base / "review-summary.json"
             summary_md_path = base / "review-summary.md"
+            summary_txt_path = base / "review-summary.txt"
             endogeny_json_path = base / "endogeny-result.json"
             endogeny_md_path = base / "endogeny-report.md"
 
@@ -214,6 +215,7 @@ def run_batch(
             summary, endogeny = run_review(submission=structured, ruleset=ruleset)
             _write_json(summary_json_path, summary)
             _write_text(summary_md_path, render_review_summary_markdown(summary))
+            _write_text(summary_txt_path, render_review_summary_text(summary))
             _write_json(endogeny_json_path, endogeny)
             _write_text(endogeny_md_path, render_endogeny_markdown(endogeny))
 

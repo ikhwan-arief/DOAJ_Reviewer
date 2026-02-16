@@ -68,6 +68,23 @@ RESULT_RULE_COLUMNS = [
     "doaj.endogeny.v1",
 ]
 
+RULE_HINT_BY_ID = {
+    "doaj.open_access_statement.v1": "open_access_statement",
+    "doaj.issn_consistency.v1": "issn_consistency",
+    "doaj.publisher_identity.v1": "publisher_identity",
+    "doaj.license_terms.v1": "license_terms",
+    "doaj.copyright_author_rights.v1": "copyright_author_rights",
+    "doaj.peer_review_policy.v1": "peer_review_policy",
+    "doaj.aims_scope.v1": "aims_scope",
+    "doaj.editorial_board.v1": "editorial_board",
+    "doaj.instructions_for_authors.v1": "instructions_for_authors",
+    "doaj.publication_fees_disclosure.v1": "publication_fees_disclosure",
+    "doaj.endogeny.v1": "endogeny",
+    "doaj.plagiarism_policy.v1": "plagiarism_policy",
+    "doaj.archiving_policy.v1": "archiving_policy",
+    "doaj.repository_policy.v1": "repository_policy",
+}
+
 REQUIRED_URL_FIELDS = [
     "open_access_statement",
     "issn_consistency",
@@ -245,6 +262,84 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
+def _sanitize_cell(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = _sanitize_cell(value)
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _as_string_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(item) for item in raw if _sanitize_cell(item)]
+
+
+def _join_csv_cell(values: list[str]) -> str:
+    return " | ".join(_dedupe_strings(values))
+
+
+def _check_problem_urls(check: dict[str, Any], raw_source_urls: dict[str, Any]) -> list[str]:
+    # Prefer explicitly traced source URLs from rich summary output.
+    source_urls = _as_string_list(check.get("source_urls", []))
+    if source_urls:
+        return _dedupe_strings(source_urls)
+
+    evidence_urls = _as_string_list(check.get("evidence_urls", []))
+    if evidence_urls:
+        return _dedupe_strings(evidence_urls)
+
+    rule_id = str(check.get("rule_id", "")).strip()
+    rule_hint = RULE_HINT_BY_ID.get(rule_id, "")
+    if rule_id == "doaj.endogeny.v1":
+        fallback_hints = ["latest_content", "archives", "editorial_board", "reviewers"]
+    elif rule_id == "doaj.editorial_board.v1":
+        fallback_hints = ["editorial_board", "reviewers"]
+    elif rule_hint:
+        fallback_hints = [rule_hint]
+    else:
+        fallback_hints = []
+
+    fallback_urls_all: list[str] = []
+    for hint in fallback_hints:
+        fallback_urls = raw_source_urls.get(hint, [])
+        if isinstance(fallback_urls, list):
+            fallback_urls_all.extend([str(item) for item in fallback_urls])
+    return _dedupe_strings(fallback_urls_all)
+
+
+def _export_fieldnames() -> list[str]:
+    fieldnames = [
+        "run_id",
+        "submission_id",
+        "overall_result",
+        "overall_decision_reason",
+    ] + RESULT_RULE_COLUMNS
+    for rule_id in RESULT_RULE_COLUMNS:
+        fieldnames.append(f"{rule_id}__note")
+        fieldnames.append(f"{rule_id}__problem_urls")
+    fieldnames.extend(
+        [
+            "must_attention_rules",
+            "must_attention_notes",
+            "must_attention_urls",
+            "supplementary_attention_rules",
+            "supplementary_attention_notes",
+            "supplementary_attention_urls",
+        ]
+    )
+    return fieldnames
+
+
 def _parse_limit(raw: str | None, default: int | None) -> int | None:
     if raw is None:
         return default
@@ -367,20 +462,21 @@ class SimulationApp:
 
     def export_rows(self, limit: int | None = None) -> list[dict[str, str]]:
         rows: list[dict[str, str]] = []
+        fieldnames = _export_fieldnames()
         for run_dir in self._run_dirs(limit=limit):
-            row = {
-                "run_id": run_dir.name,
-                "submission_id": "",
-                "overall_result": "not_available",
-            }
-            for rule_id in RESULT_RULE_COLUMNS:
-                row[rule_id] = ""
+            row = {name: "" for name in fieldnames}
+            row["run_id"] = run_dir.name
+            row["overall_result"] = "not_available"
 
+            raw_source_urls: dict[str, Any] = {}
             raw_file = run_dir / "submission.raw.json"
             if raw_file.exists():
                 try:
                     raw = _read_json(raw_file)
                     row["submission_id"] = str(raw.get("submission_id", ""))
+                    source_urls = raw.get("source_urls", {})
+                    if isinstance(source_urls, dict):
+                        raw_source_urls = source_urls
                 except Exception:
                     row["submission_id"] = ""
 
@@ -390,20 +486,74 @@ class SimulationApp:
                     summary = _read_json(summary_file)
                     row["submission_id"] = str(summary.get("submission_id", row["submission_id"]))
                     row["overall_result"] = str(summary.get("overall_result", ""))
+                    row["overall_decision_reason"] = _sanitize_cell(summary.get("overall_decision_reason", ""))
                     by_rule = {
-                        str(check.get("rule_id", "")): str(check.get("result", ""))
+                        str(check.get("rule_id", "")): check
                         for check in summary.get("checks", [])
                         if isinstance(check, dict)
                     }
+
+                    must_attention_rules: list[str] = []
+                    must_attention_notes: list[str] = []
+                    must_attention_urls: list[str] = []
+
                     for rule_id in RESULT_RULE_COLUMNS:
-                        row[rule_id] = by_rule.get(rule_id, "")
+                        check = by_rule.get(rule_id, {})
+                        if isinstance(check, dict):
+                            result = _sanitize_cell(check.get("result", ""))
+                            note = _sanitize_cell(check.get("notes", ""))
+                            problem_urls = _check_problem_urls(check, raw_source_urls)
+                        else:
+                            result = ""
+                            note = ""
+                            problem_urls = []
+
+                        row[rule_id] = result
+                        row[f"{rule_id}__note"] = note
+                        if result in {"fail", "need_human_review"}:
+                            row[f"{rule_id}__problem_urls"] = _join_csv_cell(problem_urls)
+                            if result:
+                                must_attention_rules.append(f"{rule_id}:{result}")
+                            if note:
+                                must_attention_notes.append(f"{rule_id}:{note}")
+                            for url in problem_urls:
+                                must_attention_urls.append(f"{rule_id}:{url}")
+                        else:
+                            row[f"{rule_id}__problem_urls"] = ""
+
+                    supplementary_checks = [
+                        check for check in summary.get("supplementary_checks", []) if isinstance(check, dict)
+                    ]
+                    supplementary_attention_rules: list[str] = []
+                    supplementary_attention_notes: list[str] = []
+                    supplementary_attention_urls: list[str] = []
+                    for check in supplementary_checks:
+                        result = _sanitize_cell(check.get("result", ""))
+                        if result not in {"fail", "need_human_review"}:
+                            continue
+                        rule_id = _sanitize_cell(check.get("rule_id", ""))
+                        note = _sanitize_cell(check.get("notes", ""))
+                        urls = _check_problem_urls(check, raw_source_urls)
+                        if rule_id:
+                            supplementary_attention_rules.append(f"{rule_id}:{result}")
+                        if note:
+                            supplementary_attention_notes.append(f"{rule_id}:{note}")
+                        for url in urls:
+                            supplementary_attention_urls.append(f"{rule_id}:{url}")
+
+                    row["must_attention_rules"] = _join_csv_cell(must_attention_rules)
+                    row["must_attention_notes"] = _join_csv_cell(must_attention_notes)
+                    row["must_attention_urls"] = _join_csv_cell(must_attention_urls)
+                    row["supplementary_attention_rules"] = _join_csv_cell(supplementary_attention_rules)
+                    row["supplementary_attention_notes"] = _join_csv_cell(supplementary_attention_notes)
+                    row["supplementary_attention_urls"] = _join_csv_cell(supplementary_attention_urls)
                 except Exception:
                     row["overall_result"] = "unknown"
             rows.append(row)
         return rows
 
     def render_export_csv(self, limit: int | None = None) -> str:
-        fieldnames = ["run_id", "submission_id", "overall_result"] + RESULT_RULE_COLUMNS
+        fieldnames = _export_fieldnames()
         buffer = io.StringIO()
         writer = csv.DictWriter(buffer, fieldnames=fieldnames)
         writer.writeheader()
@@ -431,7 +581,7 @@ def _html_page() -> str:
     label { display:block; font-size:12px; color:var(--muted); margin: 0 0 4px; }
     input, select, textarea, button { width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
     textarea { min-height: 74px; resize: vertical; }
-    .urls { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 10px; }
+    .urls { display:grid; grid-template-columns: 1fr; gap:10px; margin-top: 10px; }
     .manual { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top: 10px; }
     button { background:var(--accent); color:white; border:none; cursor:pointer; font-weight:600; }
     button.secondary { background:#334155; }
@@ -448,7 +598,7 @@ def _html_page() -> str:
     code { background:#f1f5f9; padding:1px 6px; border-radius:6px; }
     .run-list a, .artifacts a { color:#0b5fff; text-decoration:none; }
     .run-list li { margin-bottom:6px; }
-    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } .urls { grid-template-columns: 1fr; } .manual { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } .manual { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -460,10 +610,6 @@ def _html_page() -> str:
         <div>
           <label>Submission ID (optional)</label>
           <input id="submission_id" placeholder="SIM-001">
-        </div>
-        <div>
-          <label>Journal Homepage URL</label>
-          <input id="journal_homepage_url" placeholder="https://example-journal.org">
         </div>
         <div>
           <label>Publication Model</label>
@@ -482,22 +628,23 @@ def _html_page() -> str:
         </div>
       </div>
       <div class="urls">
-        <div><label>Open Access statement URL(s) (required)</label><textarea id="open_access_statement"></textarea></div>
-        <div><label>ISSN evidence URL(s) (required, prioritize electronic ISSN)</label><textarea id="issn_consistency"></textarea></div>
-        <div><label>Publisher information URL(s) (required)</label><textarea id="publisher_identity"></textarea></div>
-        <div><label>License terms URL(s) (required)</label><textarea id="license_terms"></textarea></div>
-        <div><label>Copyright policy URL(s) (required)</label><textarea id="copyright_author_rights"></textarea></div>
-        <div><label>Peer review policy URL(s) (required)</label><textarea id="peer_review_policy"></textarea></div>
-        <div><label>Plagiarism policy URL(s) (optional)</label><textarea id="plagiarism_policy"></textarea></div>
-        <div><label>Aims / Focus and Scope URL(s) (required)</label><textarea id="aims_scope"></textarea></div>
-        <div><label>Editorial board URL(s) (required)</label><textarea id="editorial_board"></textarea></div>
-        <div><label>Reviewer list URL(s) (optional)</label><textarea id="reviewers"></textarea></div>
-        <div><label>Latest issue URL(s) for endogeny (required, latest 2 issues)</label><textarea id="latest_content"></textarea></div>
-        <div><label>Instructions for authors URL(s) (required)</label><textarea id="instructions_for_authors"></textarea></div>
-        <div><label>Publication fee/APC URL(s) (required)</label><textarea id="publication_fees_disclosure"></textarea></div>
-        <div><label>Archiving policy URL(s) (optional)</label><textarea id="archiving_policy"></textarea></div>
-        <div><label>Repository policy URL(s) (optional)</label><textarea id="repository_policy"></textarea></div>
-        <div><label>Archive URL(s) (optional support for continuous model)</label><textarea id="archives"></textarea></div>
+        <div><label>1. Open Access statement URL(s) (required)</label><textarea id="open_access_statement"></textarea></div>
+        <div><label>2. Journal Homepage URL (required)</label><input id="journal_homepage_url" placeholder="https://example-journal.org"></div>
+        <div><label>3. ISSN evidence URL(s) (required, prioritize electronic ISSN)</label><textarea id="issn_consistency"></textarea></div>
+        <div><label>4. Publisher information URL(s) (required)</label><textarea id="publisher_identity"></textarea></div>
+        <div><label>5. License terms URL(s) (required)</label><textarea id="license_terms"></textarea></div>
+        <div><label>6. Copyright policy URL(s) (required)</label><textarea id="copyright_author_rights"></textarea></div>
+        <div><label>7. Peer review policy URL(s) (required)</label><textarea id="peer_review_policy"></textarea></div>
+        <div><label>8. Plagiarism policy URL(s) (optional)</label><textarea id="plagiarism_policy"></textarea></div>
+        <div><label>9. Aims / Focus and Scope URL(s) (required)</label><textarea id="aims_scope"></textarea></div>
+        <div><label>10. Editorial board URL(s) (required)</label><textarea id="editorial_board"></textarea></div>
+        <div><label>11. Reviewer list URL(s) (optional)</label><textarea id="reviewers"></textarea></div>
+        <div><label>12. Latest issue URL(s) for endogeny (required, latest 2 issues)</label><textarea id="latest_content"></textarea></div>
+        <div><label>13. Instructions for authors URL(s) (required)</label><textarea id="instructions_for_authors"></textarea></div>
+        <div><label>14. Publication fee/APC URL(s) (required)</label><textarea id="publication_fees_disclosure"></textarea></div>
+        <div><label>15. Archiving policy URL(s) (optional)</label><textarea id="archiving_policy"></textarea></div>
+        <div><label>16. Repository policy URL(s) (optional)</label><textarea id="repository_policy"></textarea></div>
+        <div><label>17. Archive URL(s) (optional support for continuous model)</label><textarea id="archives"></textarea></div>
       </div>
       <h3 style="margin:14px 0 6px;font-size:15px;">Manual fallback (optional, for WAF/Cloudflare blocks)</h3>
       <div class="muted" style="margin-bottom:6px;">If a policy URL is blocked, paste text and/or upload one PDF for that policy.</div>
@@ -538,8 +685,8 @@ def _html_page() -> str:
   </div>
 <script>
 const fields = [
-  "submission_id","journal_homepage_url","publication_model","js_mode",
-  "open_access_statement","issn_consistency","publisher_identity",
+  "submission_id","publication_model","js_mode",
+  "open_access_statement","journal_homepage_url","issn_consistency","publisher_identity",
   "license_terms","copyright_author_rights","peer_review_policy",
   "plagiarism_policy","aims_scope","editorial_board","reviewers",
   "latest_content","instructions_for_authors","publication_fees_disclosure",

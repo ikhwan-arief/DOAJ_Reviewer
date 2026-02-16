@@ -33,6 +33,15 @@ All notable updates to this repository are listed here.
 - Added golden regression test suite (`tests/test_golden_dataset.py`).
 - Added manual GitHub Actions workflow for golden regression (`.github/workflows/golden-regression.yml`).
 - Added CI smoke check for golden regression command.
+- Expanded review exports (`review-summary.json`, `.md`, `.txt`) with full rule traceability details:
+  source URLs, extracted policy page excerpts, crawl notes/WAF context, evidence status, and decision distributions.
+- Added top-level traceability coverage metrics in review summaries for debugging and reviewer education.
+- Added `review-summary.txt` output generation to spreadsheet batch mode.
+- Expanded simulation CSV export (`runs-overview.csv`) with detailed diagnostics:
+  per-rule notes and per-rule `problem_urls` for `fail` / `need_human_review`.
+- Added aggregate attention columns in simulation CSV:
+  `must_attention_*` and `supplementary_attention_*` to quickly find problematic rules and URLs.
+- Added fallback URL mapping for endogeny/editorial-board rows so older run summaries still show relevant source URLs.
 
 ## 2026-02-15
 

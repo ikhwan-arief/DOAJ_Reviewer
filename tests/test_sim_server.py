@@ -226,6 +226,127 @@ class SimServerHelperTests(unittest.TestCase):
             self.assertEqual(rows[1]["doaj.open_access_statement.v1"], "pass")
             self.assertEqual(rows[1]["doaj.endogeny.v1"], "need_human_review")
 
+    def test_export_csv_includes_problem_urls_for_flagged_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_dir = Path(tmpdir) / "runs"
+            run_dir = runs_dir / "20260216-ccc33333"
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            (run_dir / "submission.raw.json").write_text(
+                json.dumps(
+                    {
+                        "submission_id": "SIM-FLAGGED",
+                        "journal_homepage_url": "https://journal.example",
+                        "source_urls": {
+                            "open_access_statement": ["https://journal.example/open-access"],
+                            "aims_scope": ["https://journal.example/aims-scope"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "review-summary.json").write_text(
+                json.dumps(
+                    {
+                        "submission_id": "SIM-FLAGGED",
+                        "overall_result": "fail",
+                        "overall_decision_reason": "At least one must-rule returned fail.",
+                        "checks": [
+                            {
+                                "rule_id": "doaj.open_access_statement.v1",
+                                "result": "need_human_review",
+                                "notes": "Policy text is ambiguous.",
+                                "evidence_urls": ["https://journal.example/open-access"],
+                            },
+                            {
+                                "rule_id": "doaj.aims_scope.v1",
+                                "result": "fail",
+                                "notes": "Aims and scope statement missing.",
+                                "source_urls": ["https://journal.example/aims-scope"],
+                                "evidence_urls": [],
+                            },
+                        ],
+                        "supplementary_checks": [
+                            {
+                                "rule_id": "doaj.plagiarism_policy.v1",
+                                "result": "need_human_review",
+                                "notes": "Similarity threshold not explicit.",
+                                "evidence_urls": ["https://journal.example/plagiarism"],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            app = SimulationApp(ruleset_path=RULESET_PATH, runs_dir=runs_dir)
+            content = app.render_export_csv(limit=None)
+            rows = list(csv.DictReader(io.StringIO(content)))
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+
+            self.assertEqual(row["overall_result"], "fail")
+            self.assertEqual(row["overall_decision_reason"], "At least one must-rule returned fail.")
+            self.assertEqual(row["doaj.open_access_statement.v1"], "need_human_review")
+            self.assertIn("Policy text is ambiguous.", row["doaj.open_access_statement.v1__note"])
+            self.assertIn("https://journal.example/open-access", row["doaj.open_access_statement.v1__problem_urls"])
+            self.assertEqual(row["doaj.aims_scope.v1"], "fail")
+            self.assertIn("https://journal.example/aims-scope", row["doaj.aims_scope.v1__problem_urls"])
+            self.assertIn("doaj.aims_scope.v1:fail", row["must_attention_rules"])
+            self.assertIn("doaj.open_access_statement.v1:need_human_review", row["must_attention_rules"])
+            self.assertIn("doaj.plagiarism_policy.v1:need_human_review", row["supplementary_attention_rules"])
+
+    def test_export_csv_uses_endogeny_fallback_urls_from_raw_submission(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runs_dir = Path(tmpdir) / "runs"
+            run_dir = runs_dir / "20260216-ddd44444"
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            (run_dir / "submission.raw.json").write_text(
+                json.dumps(
+                    {
+                        "submission_id": "SIM-ENDO-FALLBACK",
+                        "journal_homepage_url": "https://journal.example",
+                        "source_urls": {
+                            "latest_content": [
+                                "https://journal.example/issue-1",
+                                "https://journal.example/issue-2",
+                            ],
+                            "archives": ["https://journal.example/archive"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "review-summary.json").write_text(
+                json.dumps(
+                    {
+                        "submission_id": "SIM-ENDO-FALLBACK",
+                        "overall_result": "fail",
+                        "checks": [
+                            {
+                                "rule_id": "doaj.endogeny.v1",
+                                "result": "fail",
+                                "notes": "Endogeny exceeds threshold.",
+                                "evidence_urls": [],
+                            }
+                        ],
+                        "supplementary_checks": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            app = SimulationApp(ruleset_path=RULESET_PATH, runs_dir=runs_dir)
+            content = app.render_export_csv(limit=None)
+            rows = list(csv.DictReader(io.StringIO(content)))
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+
+            self.assertEqual(row["doaj.endogeny.v1"], "fail")
+            self.assertIn("https://journal.example/issue-1", row["doaj.endogeny.v1__problem_urls"])
+            self.assertIn("https://journal.example/archive", row["doaj.endogeny.v1__problem_urls"])
+
 
 if __name__ == "__main__":
     unittest.main()
