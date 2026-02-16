@@ -169,8 +169,32 @@ class BasicRuleTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(evaluate_license_terms(pass_submission)["result"], "pass")
-        self.assertEqual(evaluate_license_terms(fail_submission)["result"], "fail")
+        pass_result = evaluate_license_terms(pass_submission)
+        fail_result = evaluate_license_terms(fail_submission)
+
+        self.assertEqual(pass_result["result"], "pass")
+        self.assertIn("Journal-declared license claim(s)", pass_result["notes"])
+        self.assertIn("CC BY", pass_result["notes"])
+
+        self.assertEqual(fail_result["result"], "fail")
+        self.assertIn("restrictive", fail_result["notes"])
+        self.assertIn("All rights reserved", fail_result["notes"])
+
+    def test_license_need_human_review_reports_no_explicit_claim(self) -> None:
+        submission = _submission_with_policy_pages(
+            [
+                {
+                    "rule_hint": "license_terms",
+                    "url": "https://example.org/licensing",
+                    "title": "License",
+                    "text": "Please see our policy for further information on publication matters.",
+                }
+            ]
+        )
+        result = evaluate_license_terms(submission)
+        self.assertEqual(result["result"], "need_human_review")
+        self.assertIn("no explicit journal-declared license claim", result["notes"].lower())
+        self.assertNotIn("allowed doaj options", result["notes"].lower())
 
     def test_copyright_author_rights_pass_and_fail_paths(self) -> None:
         pass_submission = _submission_with_policy_pages(

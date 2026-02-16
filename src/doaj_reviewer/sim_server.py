@@ -417,6 +417,7 @@ class SimulationApp:
                 "overall_result": summary.get("overall_result", "need_human_review"),
                 "checks": summary.get("checks", []),
                 "supplementary_checks": summary.get("supplementary_checks", []),
+                "source_urls": raw.get("source_urls", {}),
                 "warnings": warnings,
                 "artifacts": artifacts,
             }
@@ -744,6 +745,87 @@ function safeValue(value) {
   return value === null || value === undefined ? "" : value;
 }
 
+function dedupeUrls(values) {
+  const out = [];
+  const seen = new Set();
+  for (const item of (values || [])) {
+    const value = String(item || "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function isFlaggedResult(result) {
+  return result === "need_human_review" || result === "fail";
+}
+
+const fallbackHintsByRuleId = {
+  "doaj.open_access_statement.v1": ["open_access_statement"],
+  "doaj.issn_consistency.v1": ["issn_consistency"],
+  "doaj.publisher_identity.v1": ["publisher_identity"],
+  "doaj.license_terms.v1": ["license_terms"],
+  "doaj.copyright_author_rights.v1": ["copyright_author_rights"],
+  "doaj.peer_review_policy.v1": ["peer_review_policy"],
+  "doaj.aims_scope.v1": ["aims_scope"],
+  "doaj.editorial_board.v1": ["editorial_board", "reviewers"],
+  "doaj.instructions_for_authors.v1": ["instructions_for_authors"],
+  "doaj.publication_fees_disclosure.v1": ["publication_fees_disclosure"],
+  "doaj.endogeny.v1": ["latest_content", "archives", "editorial_board", "reviewers"],
+  "doaj.plagiarism_policy.v1": ["plagiarism_policy"],
+  "doaj.archiving_policy.v1": ["archiving_policy"],
+  "doaj.repository_policy.v1": ["repository_policy"]
+};
+
+function sourceUrlsByHints(sourceMap, hints) {
+  if (!sourceMap || typeof sourceMap !== "object") return [];
+  const merged = [];
+  for (const hint of (hints || [])) {
+    const values = sourceMap[hint];
+    if (!Array.isArray(values)) continue;
+    for (const value of values) merged.push(value);
+  }
+  return dedupeUrls(merged);
+}
+
+function fallbackHintsForCheck(check) {
+  const ruleId = String((check && check.rule_id) || "");
+  const byRule = fallbackHintsByRuleId[ruleId];
+  if (Array.isArray(byRule) && byRule.length) return byRule;
+
+  const ruleHint = String((check && check.rule_hint) || "");
+  if (!ruleHint) return [];
+  if (ruleHint === "endogeny") return ["latest_content", "archives", "editorial_board", "reviewers"];
+  if (ruleHint === "editorial_board") return ["editorial_board", "reviewers"];
+  return [ruleHint];
+}
+
+function reviewUrlsForCheck(check, sourceMap = null) {
+  const sourceUrls = Array.isArray(check && check.source_urls) ? check.source_urls : [];
+  const evidenceUrls = Array.isArray(check && check.evidence_urls) ? check.evidence_urls : [];
+  if (sourceUrls.length) return dedupeUrls(sourceUrls);
+  if (evidenceUrls.length) return dedupeUrls(evidenceUrls);
+  const fallbackHints = fallbackHintsForCheck(check || {});
+  return sourceUrlsByHints(sourceMap, fallbackHints);
+}
+
+function reviewUrlLinks(check, flaggedOnly = false, sourceMap = null) {
+  const result = String((check && check.result) || "");
+  if (flaggedOnly && !isFlaggedResult(result)) return "-";
+  const urls = reviewUrlsForCheck(check || {}, sourceMap);
+  if (!urls.length) return flaggedOnly ? "<span style='color:#9b1c1c'>No URL captured</span>" : "-";
+  return urls.map(url => `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`).join("<br>");
+}
+
+function resultClass(result) {
+  if (result === "pass") return "result-pass";
+  if (result === "fail") return "result-fail";
+  if (result === "need_human_review") return "result-need_human_review";
+  if (result === "not_provided") return "result-not_provided";
+  return "result-other";
+}
+
 function getFieldValue(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error("UI field not found: " + id);
@@ -842,6 +924,7 @@ function resetForm() {
 }
 
 function buildPlainTextResult(data) {
+  const sourceMap = (data && typeof data.source_urls === "object" && data.source_urls) ? data.source_urls : {};
   const lines = [];
   lines.push("DOAJ Reviewer Simulation Result");
   lines.push("=============================");
@@ -855,8 +938,16 @@ function buildPlainTextResult(data) {
   checks.forEach((item, idx) => {
     lines.push((idx + 1) + ". Rule ID    : " + (item.rule_id || ""));
     lines.push("   Result     : " + (item.result || ""));
-    lines.push("   Confidence : " + safeValue(item.confidence));
     lines.push("   Notes      : " + (item.notes || ""));
+    if (isFlaggedResult(item.result || "")) {
+      lines.push("   Review URLs:");
+      const urls = reviewUrlsForCheck(item, sourceMap);
+      if (urls.length) {
+        urls.forEach(url => lines.push("     - " + url));
+      } else {
+        lines.push("     - n/a");
+      }
+    }
     lines.push("");
   });
   const supplementary = data.supplementary_checks || [];
@@ -866,8 +957,16 @@ function buildPlainTextResult(data) {
     supplementary.forEach((item, idx) => {
       lines.push((idx + 1) + ". Rule ID    : " + (item.rule_id || ""));
       lines.push("   Result     : " + (item.result || ""));
-      lines.push("   Confidence : " + safeValue(item.confidence));
       lines.push("   Notes      : " + (item.notes || ""));
+      if (isFlaggedResult(item.result || "")) {
+        lines.push("   Review URLs:");
+        const urls = reviewUrlsForCheck(item, sourceMap);
+        if (urls.length) {
+          urls.forEach(url => lines.push("     - " + url));
+        } else {
+          lines.push("     - n/a");
+        }
+      }
       lines.push("");
     });
   }
@@ -875,12 +974,25 @@ function buildPlainTextResult(data) {
 }
 
 function buildPrintableHtml(data) {
-  const mustRows = (data.checks || []).map(item =>
-    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(safeValue(item.confidence))}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
-  ).join("");
-  const suppRows = (data.supplementary_checks || []).map(item =>
-    `<tr><td>${escapeHtml(item.rule_id || "")}</td><td>${escapeHtml(item.result || "")}</td><td>${escapeHtml(safeValue(item.confidence))}</td><td>${escapeHtml(item.notes || "")}</td></tr>`
-  ).join("");
+  const sourceMap = (data && typeof data.source_urls === "object" && data.source_urls) ? data.source_urls : {};
+  const mustRows = (data.checks || []).map(item => {
+    const result = String(item.result || "");
+    return `<tr>
+      <td>${escapeHtml(item.rule_id || "")}</td>
+      <td><span class="result-badge ${resultClass(result)}">${escapeHtml(result)}</span></td>
+      <td>${escapeHtml(item.notes || "")}</td>
+      <td>${reviewUrlLinks(item, true, sourceMap)}</td>
+    </tr>`;
+  }).join("");
+  const suppRows = (data.supplementary_checks || []).map(item => {
+    const result = String(item.result || "");
+    return `<tr>
+      <td>${escapeHtml(item.rule_id || "")}</td>
+      <td><span class="result-badge ${resultClass(result)}">${escapeHtml(result)}</span></td>
+      <td>${escapeHtml(item.notes || "")}</td>
+      <td>${reviewUrlLinks(item, true, sourceMap)}</td>
+    </tr>`;
+  }).join("");
   const warnings = (data.warnings || []).map(item => `<li>${escapeHtml(item)}</li>`).join("");
   return `<!doctype html>
 <html lang="en">
@@ -898,6 +1010,13 @@ function buildPrintableHtml(data) {
     th, td { border: 1px solid #d7dde8; padding: 6px; vertical-align: top; text-align: left; }
     th { background: #eef3fb; }
     ul { margin: 6px 0 0 18px; padding: 0; font-size: 12px; }
+    a { color: #0b5fff; text-decoration: none; }
+    .result-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+    .result-pass { background:#e8f7ef; color:#1f7a4f; }
+    .result-need_human_review { background:#fff7df; color:#8a6a0a; }
+    .result-fail { background:#fdecec; color:#9b1c1c; }
+    .result-not_provided { background:#eef2f7; color:#475569; }
+    .result-other { background:#f1f5f9; color:#334155; }
   </style>
 </head>
 <body>
@@ -910,12 +1029,12 @@ function buildPrintableHtml(data) {
   ${warnings ? `<h2>Warnings</h2><ul>${warnings}</ul>` : ""}
   <h2>Must Checks</h2>
   <table>
-    <thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Rule</th><th>Result</th><th>Notes</th><th>Review URLs (for flagged results)</th></tr></thead>
     <tbody>${mustRows || "<tr><td colspan='4'>No data</td></tr>"}</tbody>
   </table>
   <h2>Supplementary Checks (Non-must)</h2>
   <table>
-    <thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead>
+    <thead><tr><th>Rule</th><th>Result</th><th>Notes</th><th>Review URLs (for flagged results)</th></tr></thead>
     <tbody>${suppRows || "<tr><td colspan='4'>No data</td></tr>"}</tbody>
   </table>
 </body>
@@ -954,6 +1073,7 @@ function downloadResultText() {
 }
 
 function renderResult(data) {
+  const sourceMap = (data && typeof data.source_urls === "object" && data.source_urls) ? data.source_urls : {};
   const warnings = data.warnings || [];
   document.getElementById("warnings").innerHTML = warnings.length
     ? ("Warnings: " + warnings.map(w => `<code>${w}</code>`).join(" | "))
@@ -973,14 +1093,14 @@ function renderResult(data) {
   document.getElementById("artifacts").innerHTML =
     Object.entries(data.artifacts || {}).map(([k,v]) => `<div><a href="${v}" target="_blank">${k}</a></div>`).join("");
   const rowsMain = (data.checks || []).map(c =>
-    `<tr><td><code>${c.rule_id}</code></td><td>${badge(c.result)}</td><td>${c.confidence}</td><td>${c.notes || ""}</td></tr>`
+    `<tr><td><code>${c.rule_id}</code></td><td>${badge(c.result)}</td><td>${c.confidence}</td><td>${c.notes || ""}</td><td>${reviewUrlLinks(c, true, sourceMap)}</td></tr>`
   ).join("");
   const rowsSupplementary = (data.supplementary_checks || []).map(c =>
-    `<tr><td><code>${c.rule_id}</code></td><td>${badge(c.result)}</td><td>${c.confidence}</td><td>${c.notes || ""}</td></tr>`
+    `<tr><td><code>${c.rule_id}</code></td><td>${badge(c.result)}</td><td>${c.confidence}</td><td>${c.notes || ""}</td><td>${reviewUrlLinks(c, true, sourceMap)}</td></tr>`
   ).join("");
   document.getElementById("checks").innerHTML =
-    `<h3>Must checks</h3><table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead><tbody>${rowsMain}</tbody></table>`
-    + `<h3 style="margin-top:12px;">Supplementary checks (non-must)</h3><table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th></tr></thead><tbody>${rowsSupplementary}</tbody></table>`;
+    `<h3>Must checks</h3><table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th><th>Review URLs (for flagged results)</th></tr></thead><tbody>${rowsMain}</tbody></table>`
+    + `<h3 style="margin-top:12px;">Supplementary checks (non-must)</h3><table><thead><tr><th>Rule</th><th>Result</th><th>Confidence</th><th>Notes</th><th>Review URLs (for flagged results)</th></tr></thead><tbody>${rowsSupplementary}</tbody></table>`;
 }
 
 async function loadRuns() {

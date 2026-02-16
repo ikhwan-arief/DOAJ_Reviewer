@@ -33,6 +33,18 @@ LICENSE_PATTERNS = {
     "Publisher's own license": r"\bpublisher'?s?\s+own\s+licen[sc]e\b",
 }
 
+LICENSE_CLAIM_ORDERED_PATTERNS: list[tuple[str, str]] = [
+    ("CC BY-NC-ND", r"\bcc\s*by\s*-\s*nc\s*-\s*nd\b"),
+    ("CC BY-NC-SA", r"\bcc\s*by\s*-\s*nc\s*-\s*sa\b"),
+    ("CC BY-NC", r"\bcc\s*by\s*-\s*nc\b"),
+    ("CC BY-SA", r"\bcc\s*by\s*-\s*sa\b"),
+    ("CC BY-ND", r"\bcc\s*by\s*-\s*nd\b"),
+    ("CC BY", r"\bcc\s*by(?!\s*-\s*(?:nc|nd|sa))\b"),
+    ("CC0", r"\bcc0\b"),
+    ("Public domain", r"\bpublic domain\b"),
+    ("Publisher's own license", r"\bpublisher'?s?\s+own\s+licen[sc]e\b"),
+]
+
 PEER_REVIEW_TYPE_PATTERNS = {
     "Editorial review": r"\beditorial review\b",
     "Peer review": r"\bpeer review\b",
@@ -95,6 +107,44 @@ def _count_any(text: str, patterns: list[str]) -> int:
         if re.search(pattern, text, flags=re.IGNORECASE):
             count += 1
     return count
+
+
+def _extract_license_claims(text: str) -> list[str]:
+    claims: list[str] = []
+    for label, pattern in LICENSE_CLAIM_ORDERED_PATTERNS:
+        match = re.search(
+            pattern + r"(?:\s*(?:license)?\s*(?:version)?\s*(\d(?:\.\d+)?))?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        claim = label
+        version = match.group(1)
+        if version and label.startswith("CC"):
+            claim = f"{label} {version}"
+        if claim not in claims:
+            claims.append(claim)
+
+    has_creative_commons = _contains_any(text, [r"\bcreative commons\b"])
+    has_license_word = _contains_any(text, [r"\blicen[sc]e\b"])
+    has_journal_license_wording = _contains_any(
+        text,
+        [r"\bjournal licen[sc]e\b", r"\blicen[sc]e terms\b", r"\blicensing policy\b"],
+    )
+
+    if has_creative_commons and not any(claim.startswith("CC") for claim in claims):
+        claims.append("Creative Commons (type not specified)")
+
+    if (
+        has_license_word
+        and has_journal_license_wording
+        and "Publisher's own license" not in claims
+        and not any(claim.startswith("CC") for claim in claims)
+    ):
+        claims.append("Publisher/Journal license (type not specified)")
+
+    return claims[:5]
 
 
 def _waf_block_notes(submission: dict[str, Any], rule_hint: str) -> list[str]:
@@ -429,25 +479,31 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
     has_publisher_license = _contains_any(text, publisher_license_signals)
     has_negative = _contains_any(text, negative_signals)
     all_rights_reserved = _contains_any(text, [r"\ball rights reserved\b"])
-    detected = [name for name, pattern in LICENSE_PATTERNS.items() if re.search(pattern, text, flags=re.IGNORECASE)]
-    detected_text = ", ".join(detected[:5]) if detected else "none"
+    detected_claims = _extract_license_claims(text)
+    detected_text = ", ".join(detected_claims)
 
     if has_negative or (all_rights_reserved and cc_count == 0 and not has_publisher_license):
+        restrictive_claims: list[str] = []
+        if all_rights_reserved:
+            restrictive_claims.append("All rights reserved")
+        if _contains_any(text, [r"\bno license\b", r"\bwithout license\b"]):
+            restrictive_claims.append("No/without license")
+        restriction_note = f" Journal-declared restrictive statement(s): {', '.join(restrictive_claims)}." if restrictive_claims else ""
         return {
             "rule_id": rule_id,
             "result": "fail",
             "confidence": 0.86,
-            "notes": "License policy appears restrictive or missing open licensing terms.",
+            "notes": "License policy appears restrictive or missing open licensing terms." + restriction_note,
             "evidence_urls": evidence_urls,
         }
 
-    if detected:
-        confidence = 0.86 if len(detected) >= 2 else 0.8
+    if detected_claims:
+        confidence = 0.86 if len(detected_claims) >= 2 else 0.8
         return {
             "rule_id": rule_id,
             "result": "pass",
             "confidence": confidence,
-            "notes": f"Detected license option(s): {detected_text}.",
+            "notes": f"Journal-declared license claim(s) on provided URL: {detected_text}.",
             "evidence_urls": evidence_urls,
         }
 
@@ -466,7 +522,7 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
             "rule_id": rule_id,
             "result": "pass",
             "confidence": 0.68,
-            "notes": "Publisher-owned license terms were detected; manual policy quality review may still be needed.",
+            "notes": "Journal-declared license claim on provided URL: Publisher/Journal license terms.",
             "evidence_urls": evidence_urls,
         }
 
@@ -474,7 +530,7 @@ def evaluate_license_terms(submission: dict[str, Any]) -> dict[str, Any]:
         "rule_id": rule_id,
         "result": "need_human_review",
         "confidence": 0.55,
-        "notes": f"License wording exists but the allowed DOAJ options were not clearly identified (detected: {detected_text}).",
+        "notes": "License wording exists but no explicit journal-declared license claim was identified on provided URL.",
         "evidence_urls": evidence_urls,
     }
 
