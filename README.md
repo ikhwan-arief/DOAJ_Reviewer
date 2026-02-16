@@ -238,3 +238,9 @@ Manual workflow can process a submission file from the repository and upload:
 - Contribution guide: `CONTRIBUTING.md`
 - Support guide: `SUPPORT.md`
 - Codespaces guide (English): `CODESPACES_GUIDE_EN.md`
+
+## License
+
+- Source code: `PolyForm Noncommercial License 1.0.0` (see `LICENSE`).
+- Commercial use is not permitted without separate permission from the copyright holder.
+- Documentation files are intended for non-commercial use under `CC BY-NC 4.0`, unless stated otherwise.
