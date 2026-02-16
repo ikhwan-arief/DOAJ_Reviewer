@@ -179,6 +179,7 @@ Manual workflow can process a submission file from the repository and upload:
 ## Repository Information
 
 - Change log: `CHANGELOG.md`
+- Release notes template: `RELEASE_NOTES_TEMPLATE.md`
 - Contribution guide: `CONTRIBUTING.md`
 - Support guide: `SUPPORT.md`
 - Codespaces guide (English): `CODESPACES_GUIDE_EN.md`
