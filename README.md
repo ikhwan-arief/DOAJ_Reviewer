@@ -23,6 +23,18 @@ Primary DOAJ references used by this repository:
 - https://doaj.org/apply/transparency/
 - https://doaj.org/apply/copyright-and-licensing/
 
+## Latest Updates (February 16, 2026)
+
+- WAF/Cloudflare-aware crawling: blocked pages are detected and routed to `need_human_review`.
+- Per-domain throttling + exponential retry were added to reduce rate-limit/block failures.
+- Manual fallback for blocked policy URLs: paste policy text and optionally upload policy PDF in simulation UI.
+- `Print to PDF` from browser print dialog (user chooses save location).
+- `Download text` for plain-text summary (`.txt`).
+- Run artifacts now include `review-summary.txt`.
+- Reviewer policy checks were refined for DOAJ-oriented field order and reviewer composition rules.
+
+See full history in `CHANGELOG.md`.
+
 ## Decision Outputs
 
 Each rule check returns one of:
@@ -132,9 +144,8 @@ PYTHONPATH=src python -m doaj_reviewer.sim_server --host 127.0.0.1 --port 8787
 Open:
 
 - `http://127.0.0.1:8787`
-- Result panel supports:
-  - `Print to PDF` (browser print dialog, user chooses Save as PDF + target folder)
-  - `Download text` (plain `.txt` summary file for current simulation result)
+- `Print to PDF` (browser print dialog, user chooses Save as PDF + target folder)
+- `Download text` (plain `.txt` summary file for current simulation result)
 
 Useful endpoints:
 
@@ -167,6 +178,7 @@ Manual workflow can process a submission file from the repository and upload:
 
 ## Repository Information
 
+- Change log: `CHANGELOG.md`
 - Contribution guide: `CONTRIBUTING.md`
 - Support guide: `SUPPORT.md`
 - Codespaces guide (English): `CODESPACES_GUIDE_EN.md`
