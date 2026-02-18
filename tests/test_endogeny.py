@@ -99,6 +99,35 @@ class EndogenyEvaluatorTests(unittest.TestCase):
             result["limitations"],
         )
 
+    def test_need_human_review_when_no_eligible_role_people(self) -> None:
+        submission = _base_submission()
+        submission["role_people"] = [
+            {"name": "Alex Staff", "role": "assistant", "source_url": "https://example.org/editorial-board"}
+        ]
+
+        result = evaluate_endogeny(submission)
+
+        self.assertEqual(result["result"], "need_human_review")
+        self.assertIn(
+            "No eligible editor/editorial board member/reviewer names were available for matching.",
+            result["limitations"],
+        )
+
+    def test_non_eligible_roles_are_ignored_in_matching(self) -> None:
+        submission = _base_submission()
+        submission["role_people"] = [
+            {"name": "Alex Staff", "role": "assistant", "source_url": "https://example.org/editorial-board"},
+            {"name": "Dr. Jane Smith", "role": "editor", "source_url": "https://example.org/editorial-board"},
+        ]
+        submission["units"][0]["research_articles"][0]["authors"] = ["Alex Staff"]
+        submission["units"][0]["research_articles"][1]["authors"] = ["Dr. Jane Smith"]
+
+        result = evaluate_endogeny(submission)
+
+        self.assertEqual(result["computed_metrics"]["units"][0]["matched_article_count"], 1)
+        matched_roles = {item.get("matched_role", "") for item in result.get("matched_articles", [])}
+        self.assertNotIn("assistant", matched_roles)
+
 
 if __name__ == "__main__":
     unittest.main()

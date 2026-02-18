@@ -12,6 +12,7 @@ RULE_ID = "doaj.endogeny.v1"
 RULE_VERSION = "1.0.0"
 THRESHOLD = 0.25
 FUZZY_THRESHOLD = 0.94
+ELIGIBLE_ROLES = {"editor", "editorial_board_member", "reviewer"}
 
 _TITLE_RE = re.compile(r"\b(dr|prof|professor|mr|ms|mrs)\.?\b", re.IGNORECASE)
 _SPACE_RE = re.compile(r"\s+")
@@ -61,6 +62,23 @@ def _build_people_index(role_people: list[dict[str, Any]]) -> tuple[list[dict[st
         if entry["initials_key"]:
             by_initials.setdefault(entry["initials_key"], []).append(entry)
     return people, by_exact, by_initials
+
+
+def _filter_eligible_role_people(role_people: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    eligible: list[dict[str, Any]] = []
+    ignored_count = 0
+
+    for person in role_people:
+        if not isinstance(person, dict):
+            ignored_count += 1
+            continue
+        role = str(person.get("role", "")).strip().lower()
+        if role in ELIGIBLE_ROLES:
+            eligible.append(person)
+        else:
+            ignored_count += 1
+
+    return eligible, ignored_count
 
 
 def _match_author(
@@ -195,7 +213,10 @@ def _explanation(result: str, unit_count: int, max_ratio: float, limitations: li
 def evaluate_endogeny(submission: dict[str, Any]) -> dict[str, Any]:
     publication_model = submission.get("publication_model", "unknown")
     units = submission.get("units", [])
-    role_people = submission.get("role_people", [])
+    role_people_raw = submission.get("role_people", [])
+    if not isinstance(role_people_raw, list):
+        role_people_raw = []
+    role_people, ignored_role_people_count = _filter_eligible_role_people(role_people_raw)
 
     people, by_exact, by_initials = _build_people_index(role_people)
     matched_articles: list[dict[str, Any]] = []
@@ -252,10 +273,25 @@ def evaluate_endogeny(submission: dict[str, Any]) -> dict[str, Any]:
     measured_units = [u for u in metrics_units if u["window_type"] == expected_window]
     max_ratio = max((u["ratio"] for u in measured_units), default=0.0)
     result, limitations = _classify_decision(publication_model, measured_units, max_ratio)
+    if not people:
+        limitations.append("No eligible editor/editorial board member/reviewer names were available for matching.")
+        result = "need_human_review"
     confidence = _confidence_score(result, matched_articles, limitations)
     explanation_en = _explanation(result, len(measured_units), max_ratio, limitations)
 
     evidence = _sanitize_evidence(submission.get("evidence", []))
+    if ignored_role_people_count:
+        evidence.append(
+            {
+                "kind": "crawl_note",
+                "url": submission.get("journal_homepage_url", ""),
+                "excerpt": (
+                    f"Ignored {ignored_role_people_count} role entries outside eligible set "
+                    "(editor/editorial_board_member/reviewer)."
+                )[:300],
+                "locator_hint": "endogeny.ignored_role_people",
+            }
+        )
     source_urls = submission.get("source_urls", {})
     reviewer_urls = source_urls.get("reviewers", []) if isinstance(source_urls, dict) else []
     if not reviewer_urls:
