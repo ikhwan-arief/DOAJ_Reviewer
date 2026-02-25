@@ -8,6 +8,9 @@ Automated reviewer for DOAJ application submissions.
 
 This project validates applicant-provided journal URLs against DOAJ must-rules.
 It is designed as a reviewer assistant, not a form-filling assistant.
+It is independently developed and is not an official DOAJ system.
+
+> Disclaimer: This tool is not officially developed or maintained by DOAJ. Any results from this tool do not constitute an official DOAJ evaluation and must not be cited or represented as a DOAJ decision.
 
 Main objective:
 
