@@ -578,6 +578,7 @@ def _html_page() -> str:
     .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; box-shadow:0 8px 22px rgba(15,23,42,.05);}
     h1 { margin:0 0 8px; font-size: 24px; }
     .muted { color:var(--muted); font-size: 14px; margin-bottom: 12px; }
+    .disclaimer { color:#7a1f1f; background:#fff5f5; border:1px solid #f2d3d3; border-radius:8px; font-size:12px; padding:8px 10px; margin:0 0 12px; }
     .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
     label { display:block; font-size:12px; color:var(--muted); margin: 0 0 4px; }
     input, select, textarea, button { width:100%; border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
@@ -607,6 +608,7 @@ def _html_page() -> str:
     <div class="card">
       <h1>DOAJ Reviewer Simulation</h1>
       <div class="muted">Use this realistic form to test URL crawling, rule checks, and generated artifacts per run.</div>
+      <div class="disclaimer"><strong>Disclaimer:</strong> this tool is not officially developed or maintained by DOAJ. Any results from the use of this tool do not constitute an official DOAJ evaluation, and should not be cited or represented as a DOAJ decision.</div>
       <div class="grid">
         <div>
           <label>Submission ID (optional)</label>
